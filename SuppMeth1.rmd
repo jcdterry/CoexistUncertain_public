@@ -1,0 +1,468 @@
+---
+title: "Supplementary Methods 1"
+author: "Chris Terry"
+output:
+  pdf_document: 
+    toc: yes
+    number_sections: yes
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Summary 
+
+This document is a knit `.rmd` file that works through the steps of the reanalysis of *Small rainfall changes drive substantial changes in plant coexistence* by Van Dyke et al 2022  (Nature), to support a 'Matters Arising' response. Original data from the authors is available at https://doi.org/10.5281/zenodo.7083314 
+
+Section 4 details the methods used to conduct a model comparison analysis to examine the level of statistical support for the treatment impacting the key model parameters and subsequent key coexistence quantities.  
+
+Section 5 propogates forward the authors original full bootstrap through to the final assessment of whether the predicted coexistence outcome species pair differs between treatments. 
+
+
+# Loading and looking at data
+```{r message = FALSE, warning = FALSE}
+library(tidyverse)
+set.seed(1)
+
+Path_to_Orig <- '../DroughtCompUncertainty/water_competition-2.0/Sedgwick_public/'
+
+nls_boot_pairs<-read.csv(paste0(Path_to_Orig,"output/nls_boot_pairs_1000_full_model.csv"))
+seed_data <- read.csv(paste0(Path_to_Orig,"data/drought_seed_production_data.csv"))
+
+seed_data$Tr <- ifelse(seed_data$treat == "W", 1, 2)
+seed_data <- seed_data %>% 
+  mutate( background = ifelse(is.na(background),
+                              focal, background)) # where 0 background, naming after focal
+
+seed_data$N_acwr <- ifelse(seed_data$background == "ACWR", seed_data$num_comp, 0)
+seed_data$N_femi <- ifelse(seed_data$background == "FEMI", seed_data$num_comp, 0)
+seed_data$N_homu <- ifelse(seed_data$background == "HOMU", seed_data$num_comp, 0)
+seed_data$N_pler <- ifelse(seed_data$background == "PLER", seed_data$num_comp, 0)
+seed_data$N_saco <- ifelse(seed_data$background == "SACO", seed_data$num_comp, 0)
+seed_data$N_urli <- ifelse(seed_data$background == "URLI", seed_data$num_comp, 0)
+```
+
+## How much data? 
+
+```{r}
+nrow(seed_data)
+count(seed_data, background, focal, treat) %>% arrange(n) %>% head()
+```
+
+## How much uncertainty in types of parameters
+
+```{R}
+
+### no lambda sd saved, so will need to reconstruct, following original code
+
+spp_treat_boot_combos <-read.csv(paste0(Path_to_Orig, "output/final_output_nls_boot_1000.csv")) 
+
+#Data frame with medians and sds for parameters----
+spp_list <- sort(na.omit( unique(seed_data$focal)))
+treat_list <- sort( na.omit( unique(seed_data$Tr)))
+spp_treat_combos <- expand.grid(species = spp_list, treatment = treat_list)
+comp_labels <- sort( na.omit( unique(seed_data$background) ))
+
+spp_treat_boot_combos$sp_pair <- paste(spp_treat_boot_combos$focal,
+                                       spp_treat_boot_combos$competitor, sep = "_")
+
+spp_treat_comp_combos <- expand.grid(focal = spp_list,
+                                     competitor = comp_labels,
+                                     treatment = treat_list)
+
+boot_NEW <- spp_treat_comp_combos %>%  mutate(alpha = 0, alpha_sd = 0,
+         lambda = 0, lambda_sd =0)
+boot_NEW$sp_pair <- paste(boot_NEW$focal, boot_NEW$competitor, sep = "_")  
+
+for( i in 1:nrow(spp_treat_comp_combos)) {
+  sp1 <- spp_treat_comp_combos[i, "focal"] %>% unlist
+  sp2 <- spp_treat_comp_combos[i, "competitor"] %>% unlist
+  treatt <- spp_treat_comp_combos[i , "treatment"] %>% unlist
+  boot_NEW[i, "alpha"] <- median(with(spp_treat_boot_combos, 
+                                      alpha[treatment == treatt &
+                                              focal == sp1 &
+                                              competitor == sp2 
+                                      ]), na.rm=TRUE)
+  boot_NEW[i, "alpha_sd"] <- sd(with(spp_treat_boot_combos, 
+                                     alpha[treatment == treatt & 
+                                             focal == sp1 & 
+                                             competitor == sp2 
+                                     ]), na.rm=TRUE)
+  boot_NEW[i, "lambda"] <- median(with(spp_treat_boot_combos, 
+                                       lambda[focal == sp1 & competitor == sp2 & 
+                                                treatment == treatt]), na.rm=TRUE)
+  boot_NEW[i, "lambda_sd"] <- sd(with(spp_treat_boot_combos, 
+                                      lambda[focal == sp1 & competitor == sp2 & 
+                                               treatment == treatt]), na.rm=TRUE)
+} 
+
+boot_NEW %>%
+  filter(focal==competitor ) %>%
+  mutate(LamCV= lambda_sd/lambda) %>%
+  summarise(mean(LamCV))
+
+boot_NEW %>%
+  mutate(AlpCV= alpha_sd/alpha)%>%
+  summarise(mean(AlpCV))
+
+```
+
+
+# Plotting raw data with model best-fit
+
+
+```{r}
+spp_list <- sort(na.omit( unique(seed_data$focal)))
+```
+
+
+```{r}
+set.seed(3)
+
+AddPreds<- function(focalsp){
+  focal_data <- filter(seed_data, focal == focalsp)
+  
+  fit<- nls(log(num_seeds)~log(lambda[Tr]/(1+a_ACWR[Tr]*N_acwr+a_FEMI[Tr]*N_femi+
+                                             a_HOMU[Tr]*N_homu+a_PLER[Tr]*N_pler+
+                                             a_SACO[Tr]*N_saco+a_URLI[Tr]*N_urli)),
+            data=focal_data, 
+            start=list('lambda'= c(100,100),
+                       a_ACWR=c(0.1, 0.1), a_FEMI=c(0.1, 0.1), 
+                       a_HOMU=c(0.1, 0.1), a_PLER=c(0.1, 0.1), 
+                       a_SACO=c(0.1, 0.1),a_URLI=c(0.1, 0.1)),
+            lower = c( 1, 1, rep(.001, 12) ),
+            upper = c(10000, 10000, rep(2, 12)), 
+            control = list(maxiter = 100000),
+            algorithm = 'port') 
+  focal_data$Prediction <- predict(fit)
+  return(focal_data)
+}
+
+data_predict <- map_df( spp_list,AddPreds)
+```
+
+
+```{r fig.height=8, fig.width=8}
+data_predict %>%
+  rename(Focal = focal, Background = background) %>%
+  arrange(num_comp)%>%
+  ggplot(aes( x =num_comp, col = treat)) +
+  geom_point(aes(y = log(num_seeds)), size = 1)+
+  facet_grid(Focal~Background, scales = 'free_x',
+             labeller= label_both)+
+  geom_line(aes(y = Prediction))+
+  theme_light()+
+  xlab('Number of Competitors')+
+  ylab('Number of Seeds produced (log scale)')+
+  scale_color_manual(values=c('W' ="#4E84C4", 'D' = "#D16103"),
+                     name = "Treatment:", 
+                     labels = c("Ambient", "Reduced Rain"))+
+  theme(legend.position = 'bottom')
+
+
+ggsave('ExFig1_RawPredict.png', height = 8, width = 8, dpi = 200)
+
+
+```       
+
+
+# Fitting set of models with different levels of parameterisation
+
+```{r warning = FALSE}
+## Mapping over all 6 focal species
+FindFourAICs <- function(focalsp){
+  
+  focal_data <- filter(seed_data, focal == focalsp)
+  
+  fit_test<- nls(log(num_seeds)~log(lambda[Tr]/(1+a_ACWR[Tr]*N_acwr+a_FEMI[Tr]*N_femi+
+                                                  a_HOMU[Tr]*N_homu+a_PLER[Tr]*N_pler+
+                                                  a_SACO[Tr]*N_saco+a_URLI[Tr]*N_urli)),
+                 data=focal_data, 
+                 start=list('lambda'= c(100,100),
+                            a_ACWR=c(0.1, 0.1), a_FEMI=c(0.1, 0.1), 
+                            a_HOMU=c(0.1, 0.1), a_PLER=c(0.1, 0.1),
+                            a_SACO=c(0.1, 0.1),a_URLI=c(0.1, 0.1)),
+                 lower = c( 1, 1, rep(.001, 12) ),
+                 upper = c(10000, 10000, rep(2, 12)), 
+                 control = list(maxiter = 100000),
+                 algorithm = 'port') 
+  
+  fit_test_nosplit<- nls(log(num_seeds)~log(lambda/(1+a_ACWR*N_acwr+a_FEMI*N_femi+
+                                                      a_HOMU*N_homu+a_PLER*N_pler+
+                                                      a_SACO*N_saco+a_URLI*N_urli)),
+                         data=focal_data, 
+                         start=list('lambda'= c(100),
+                                    a_ACWR=c(0.1), a_FEMI=c(0.1), 
+                                    a_HOMU=c(0.1), a_PLER=c(0.1),
+                                    a_SACO=c(0.1),a_URLI=c(0.1)),
+                         lower = c( 1, rep(.001, 6) ),
+                         upper = c(10000, rep(2, 6)), 
+                         control = list(maxiter = 100000),
+                         algorithm = 'port')
+  
+  fit_test_justA<- nls(log(num_seeds)~log(lambda/(1+a_ACWR[Tr]*N_acwr+a_FEMI[Tr]*N_femi+
+                                                    a_HOMU[Tr]*N_homu+a_PLER[Tr]*N_pler+
+                                                    a_SACO[Tr]*N_saco+a_URLI[Tr]*N_urli)),
+                       data=focal_data, 
+                       start=list('lambda'= c(100),a_ACWR=c(0.1, 0.1), a_FEMI=c(0.1, 0.1), 
+                                  a_HOMU=c(0.1, 0.1), a_PLER=c(0.1, 0.1),
+                                  a_SACO=c(0.1, 0.1),a_URLI=c(0.1, 0.1)),
+                       lower = c( 1, rep(.001, 12) ),
+                       upper = c(10000, rep(2, 12)), 
+                       control = list(maxiter = 100000),
+                       algorithm = 'port')
+  
+  fit_test_justLam<- nls(log(num_seeds)~log(lambda/(1+a_ACWR[Tr]*N_acwr+a_FEMI[Tr]*N_femi+
+                                                      a_HOMU[Tr]*N_homu+a_PLER[Tr]*N_pler+
+                                                      a_SACO[Tr]*N_saco+a_URLI[Tr]*N_urli)),
+                         data=focal_data,
+                         start=list('lambda'= c(100,100),a_ACWR=c(0.1, 0.1), a_FEMI=c(0.1, 0.1), 
+                                    a_HOMU=c(0.1, 0.1), a_PLER=c(0.1, 0.1),
+                                    a_SACO=c(0.1, 0.1),a_URLI=c(0.1, 0.1)),
+                         lower = c( 1,1, rep(.001, 12) ),
+                         upper = c(10000,10000, rep(2, 12)), 
+                         control = list(maxiter = 100000),
+                         algorithm = 'port')
+  
+  XX <- data.frame(FocalSp = focalsp,
+                   LogL_NoTre = logLik(fit_test_nosplit),
+                   LogL_JustA = logLik(fit_test_justA),
+                   LogL_JustL = logLik(fit_test_justLam),
+                   LogL_Orig  = logLik(fit_test)) %>%
+    mutate(k_NoTre =7, 
+           k_JustA =13,
+           k_JustL =8,
+           k_Orig = 14)%>%
+    mutate(aic_NoTre = 2*k_NoTre - (2*LogL_NoTre) ,
+           aic_JustA = 2*k_JustA - (2*LogL_JustA) ,
+           aic_JustL = 2*k_JustL - (2*LogL_JustL) ,
+           aic_Orig  = 2*k_Orig  - (2*LogL_Orig))
+  
+return(XX)
+}
+```
+
+## AIC Tables
+```{R warning = FALSE}
+AICTable<- map_df( spp_list, FindFourAICs)
+
+
+
+knitr::kable(t(AICTable), digits = 1)
+
+knitr::kable(select(AICTable,FocalSp , starts_with('aic')), digits = 1)
+
+
+dfLL <- data.frame(LogLik = select(AICTable, starts_with('LogL')) %>%
+                     summarise_all(sum) %>% t) 
+
+
+dfLL$n_params = c(84, 42, 78, 48)
+
+dfLL %>%
+  mutate( AIC= (2*n_params) - (2*LogLik) )
+
+
+```
+
+# Full Posteriors
+
+### Which pair-directions to plot?
+```{r}
+#get all the pairs where the fitness difference is above 1 in the wet plots----
+nls_boot_pairs$fd_superior <- ifelse(nls_boot_pairs$fd < 1, 1/nls_boot_pairs$fd, nls_boot_pairs$fd)
+nls_boot_pairs$fd_sup_sp <- ifelse(nls_boot_pairs$fd <= 1, 1, 2)
+nls_boot_pairs_sup <- nls_boot_pairs %>%filter(fd_sup_sp == 2 )
+W_superior <- with(nls_boot_pairs_sup, sp_pair[treatment==1])
+
+boots_pairs_w_sup <- nls_boot_pairs %>% filter(sp_pair %in% W_superior)
+boots_pairs_w_sup$treat <- factor(boots_pairs_w_sup$treat, levels = c(1, 2))
+
+boots_pairs_w_sup$treatment <- factor(boots_pairs_w_sup$treatment, levels = c(1, 2))
+boots_pairs_w_sup$label <- paste0(substr(boots_pairs_w_sup$focal, 1, 2),
+                                  "-", substr(boots_pairs_w_sup$competitor, 1, 2))
+
+PairsToPlot <- unique(boots_pairs_w_sup$sp_pair )
+
+```
+
+### Data Preparation
+```{R}
+final_output_nls_boot <-read.csv(paste0(Path_to_Orig,
+                                        "output/final_output_nls_boot_1000.csv"))
+spp_treat_boot_combos <- final_output_nls_boot 
+
+#Data frame with medians and sds for parameters----
+spp_list <- sort(na.omit( unique(seed_data$focal)))
+treat_list <- sort( na.omit( unique(seed_data$Tr)))
+spp_treat_combos <- expand.grid(species = spp_list, treatment = treat_list)
+comp_labels <- sort( na.omit( unique(seed_data$background) ))
+
+spp_treat_boot_combos$sp_pair <- paste(spp_treat_boot_combos$focal,
+                                       spp_treat_boot_combos$competitor, sep = "_")  
+
+spp_treat_comp_combos <- expand.grid(focal = spp_list,
+                                     competitor = comp_labels,
+                                     treatment = treat_list)
+
+nls_boot_pairs$sp_pair <- paste(nls_boot_pairs$focal, nls_boot_pairs$competitor, sep = "_")  
+
+nls_boot_pairs %>%
+  filter(sp_pair %in% PairsToPlot) %>%
+  mutate( Treatment = ifelse(treatment ==1, 'WET', 'DRY')) ->  OriginalErrorBarsForAdding
+
+```
+
+### Create coexistence area for plot - min/max fitness difference that permits coexistence
+
+```{r}
+niche_differentiation <- seq(from = -.25, to = 1, by = 0.001)
+niche_overlap <- 1-niche_differentiation
+fitness_ratio_min <- niche_overlap
+fitness_ratio_max <- 1/niche_overlap
+
+coexistarea_df <- data.frame(niche_diff = niche_differentiation,
+                             min_fitness_ratio = fitness_ratio_min,
+                             max_fitness_ratio = fitness_ratio_max)
+```
+
+
+## Plotting
+```{R fig.height=10, fig.width=10, warning = FALSE}
+spp_treat_boot_combos %>%
+  filter(sp_pair %in% PairsToPlot) %>%
+  mutate( Treatment = ifelse(treatment ==1, 'WET', 'DRY')) %>%
+  arrange(snd) %>%
+  ggplot()+
+  geom_line(data = coexistarea_df, aes(x = niche_diff, y = max_fitness_ratio)) +
+  geom_line(data = coexistarea_df,  aes(x = niche_diff, y = min_fitness_ratio)) +
+  geom_ribbon(data = coexistarea_df, aes(x = niche_diff, ymin = min_fitness_ratio,
+                                         ymax = max_fitness_ratio), fill = 'grey80') +
+  geom_point(aes( x = snd, y = fd,col = Treatment), alpha = 0.1, size = 0.1)+
+  facet_wrap(~sp_pair,  nrow = 3)+
+  scale_y_log10()+
+  coord_cartesian(xlim = c(-0.2,1), ylim = c(0.01, 100) )+ 
+  theme_classic()+
+  geom_point(aes(x = snd, y = fd, color = Treatment),
+             data= OriginalErrorBarsForAdding) +
+  geom_errorbar(aes(x = snd, ymin = fd_low, ymax = fd_high),
+                data= OriginalErrorBarsForAdding) +
+  geom_errorbarh(aes(y = fd, xmin = snd_low, xmax =snd_high),
+                 data= OriginalErrorBarsForAdding)+
+  scale_color_manual(values=c('WET' ="#4E84C4", 'DRY' = "#D16103"), 
+                     name = "Treatment:",
+                     labels = c("Ambient", "Reduced Rain"))+
+  theme(legend.position = 'bottom', axis.text.x = element_text(angle = -90))+
+  ylab('Maximum Fitness Ratio')+
+  xlab('Stabilising Niche Difference')
+
+ggsave('ExFig2_CoexistPlots.png', height = 10, width = 8, dpi = 200)
+
+```
+
+## Determining fraction of pairs that follow identified pattern
+```{r}
+# original results
+nls_boot_pairs_unique <-  nls_boot_pairs %>%  filter(focal != competitor )
+nls_boot_pairs_unique$treatment <- factor(nls_boot_pairs_unique$treatment, levels = c(1, 2))
+nls_boot_pairs_unique$fd_superior <- ifelse(nls_boot_pairs_unique$fd < 1, 
+                                            1/nls_boot_pairs_unique$fd,
+                                            nls_boot_pairs_unique$fd)
+nls_boot_pairs_unique$coexist <- ifelse((nls_boot_pairs_unique$snd > 
+                                           (1-1/nls_boot_pairs_unique$fd_superior)),
+                                        1, 0 )
+
+##Stabilizing niche and fitness differences: (Table ED3)
+pars_boot <- nls_boot_pairs_unique %>%
+  select(focal,competitor,treatment,snd,
+         fd,fd_superior,coexist, fd_sup_sp)
+
+pars_boot$species <- paste0(substr(pars_boot$focal, 1, 2),
+                            "-",
+                            substr(pars_boot$competitor, 1, 2))
+
+pars_boot$outcome <- ifelse(pars_boot$coexist == 1, "coexist",
+                            ifelse(pars_boot$fd_sup_sp == 2, 
+                                   paste0(substr(pars_boot$species, 4, 5), " wins"), 
+                                   paste0(substr(pars_boot$species, 1, 2), " wins")))
+
+pair_labels <- pars_boot %>%
+  filter(treatment == 1 ) %>%
+  filter(fd > 1)
+
+pair_labels <- unique(pair_labels$species)
+pars_boot <- pars_boot %>% filter(species %in% pair_labels)
+pars_boot <- subset(pars_boot, select =  -c(focal, competitor, coexist,
+                                            fd_sup_sp, fd_superior))
+
+pars_boot_wide<-pivot_wider(data = pars_boot,
+                            names_from = treatment,
+                            values_from = c(snd, fd, outcome))%>%
+  arrange(species)
+
+```
+
+## Repeating across the whole bootstrap sample
+```{r}
+spp_treat_boot_combos %>%
+  filter(sp_pair %in% PairsToPlot) %>%
+  mutate(fd_superior <- ifelse(fd < 1, 1/fd,fd) ,
+         fd_sup_sp <- ifelse(fd <= 1, 1, 2),
+         coexist = ifelse((snd > (1-1/fd_superior)), 1, 0 ),
+         outcome = ifelse(coexist == 1, "coexist",
+                          ifelse(fd_sup_sp == 2, 
+                                 paste0(focal , " wins"), 
+                                 paste0(competitor , " wins")))) %>%
+  group_by(treatment, sp_pair) %>%
+  count(outcome) %>%
+  pivot_wider(id_cols = c(treatment, sp_pair), names_from = outcome, 
+              values_from = n, values_fill = 0) -> PosteriorResults
+
+## Just looking at change in 'coexist' result
+
+PosteriorResults %>%
+  mutate( Treatment = ifelse(treatment ==1, 'WET', 'DRY'))%>%
+  mutate(coexist_frac = coexist/1000) %>%
+  ungroup() %>%
+  select(Treatment, sp_pair, coexist_frac) %>%
+  pivot_wider(id_cols = sp_pair, names_from = Treatment, values_from = coexist_frac) %>%
+  mutate( AbsoluteChange = WET-DRY) %>%
+  mutate(species  = paste0(substr(sp_pair     , 1, 2),## For Joining with pars_boot_wide
+                           "-",
+                           substr(sp_pair     , 6, 7))) %>%
+  left_join(pars_boot_wide, by = "species") -> JoinResults
+
+
+JoinResults$OriginalFindsChange <- JoinResults$outcome_1 != JoinResults$outcome_2
+
+
+## probability of each draw showing switch from coexistence = prob(coexist1) *prob 
+## Assuming just two outcomes: coexist, or something else
+# If change from victory -> coexist, probability observe change =  1-prob(coexist1) * prob(coexist)
+# If change from coexist -> victory, probability observe change =  prob(coexist1) * 1-prob(coexist)
+
+JoinResults %>%
+  filter(OriginalFindsChange) %>%
+  mutate(LikelihoodObserveChange = ifelse(outcome_1 == 'coexist',
+                                          WET *(1-DRY),
+                                          (1-WET)*DRY)) %>%
+  select(SpeciesPair =species, 
+         LikelihoodCoexist_Wet= WET,
+         LikelihoodCoexist_Dry = DRY,
+         outcome_Wet=outcome_1, outcome_Dry=outcome_2,
+         LikelihoodObserveChange )-> JoinResults2
+
+knitr::kable(JoinResults2,digits =3)
+
+JoinResults2$LikelihoodObserveChange %>% mean
+```
+
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
