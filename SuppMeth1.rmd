@@ -2,7 +2,10 @@
 title: "Supplementary Methods 1"
 author: "Chris Terry"
 output:
-  pdf_document: 
+  html_document:
+    toc: yes
+    df_print: paged
+  pdf_document:
     toc: yes
     number_sections: yes
 editor_options:
@@ -74,7 +77,7 @@ spp_treat_comp_combos <- expand.grid(focal = spp_list,
                                      treatment = treat_list)
 
 boot_NEW <- spp_treat_comp_combos %>%  mutate(alpha = 0, alpha_sd = 0,
-         lambda = 0, lambda_sd =0)
+                                              lambda = 0, lambda_sd =0)
 boot_NEW$sp_pair <- paste(boot_NEW$focal, boot_NEW$competitor, sep = "_")  
 
 for( i in 1:nrow(spp_treat_comp_combos)) {
@@ -215,57 +218,67 @@ FindFourAICs <- function(focalsp){
                        control = list(maxiter = 100000),
                        algorithm = 'port')
   
-  fit_test_justLam<- nls(log(num_seeds)~log(lambda/(1+a_ACWR[Tr]*N_acwr+a_FEMI[Tr]*N_femi+
-                                                      a_HOMU[Tr]*N_homu+a_PLER[Tr]*N_pler+
-                                                      a_SACO[Tr]*N_saco+a_URLI[Tr]*N_urli)),
+  fit_test_justLam<- nls(log(num_seeds)~log(lambda[Tr]/(1+a_ACWR*N_acwr+a_FEMI*N_femi+
+                                                      a_HOMU*N_homu+a_PLER*N_pler+
+                                                      a_SACO*N_saco+a_URLI*N_urli)),
                          data=focal_data,
-                         start=list('lambda'= c(100,100),a_ACWR=c(0.1, 0.1), a_FEMI=c(0.1, 0.1), 
-                                    a_HOMU=c(0.1, 0.1), a_PLER=c(0.1, 0.1),
-                                    a_SACO=c(0.1, 0.1),a_URLI=c(0.1, 0.1)),
-                         lower = c( 1,1, rep(.001, 12) ),
-                         upper = c(10000,10000, rep(2, 12)), 
+                         start=list('lambda'= c(100,100),a_ACWR=c(0.1), a_FEMI=c(0.1), 
+                                    a_HOMU=c(0.1), a_PLER=c(0.1),
+                                    a_SACO=c(0.1),a_URLI=c(0.1)),
+                         lower = c( 1,1, rep(.001, 6) ),
+                         upper = c(10000,10000, rep(2, 6)), 
                          control = list(maxiter = 100000),
                          algorithm = 'port')
   
   XX <- data.frame(FocalSp = focalsp,
                    LogL_NoTre = logLik(fit_test_nosplit),
-                   LogL_JustA = logLik(fit_test_justA),
                    LogL_JustL = logLik(fit_test_justLam),
+                   LogL_JustA = logLik(fit_test_justA),
                    LogL_Orig  = logLik(fit_test)) %>%
     mutate(k_NoTre =7, 
-           k_JustA =13,
            k_JustL =8,
+           k_JustA =13,
            k_Orig = 14)%>%
-    mutate(aic_NoTre = 2*k_NoTre - (2*LogL_NoTre) ,
-           aic_JustA = 2*k_JustA - (2*LogL_JustA) ,
-           aic_JustL = 2*k_JustL - (2*LogL_JustL) ,
-           aic_Orig  = 2*k_Orig  - (2*LogL_Orig))
+    mutate(aic_1NoTre = 2*k_NoTre - (2*LogL_NoTre) ,
+           aic_2JustL = 2*k_JustL - (2*LogL_JustL) ,
+           aic_3JustA = 2*k_JustA - (2*LogL_JustA) ,
+           aic_4Orig  = 2*k_Orig  - (2*LogL_Orig))
   
-return(XX)
+  return(XX)
 }
 ```
 
 ## AIC Tables
 ```{R warning = FALSE}
-AICTable<- map_df( spp_list, FindFourAICs)
+AICTable<- map_df( spp_list, FindFourAICs) %>%
+  left_join(count(seed_data, focal), c('FocalSp'='focal') )
 
+AICTable %>%
+  mutate(BIC_1NoTre = log(n)*k_NoTre - (2*LogL_NoTre), 
+         BIC_2JustL = log(n)*k_JustL - (2*LogL_JustL), 
+         BIC_3JustA = log(n)*k_JustA - (2*LogL_JustA), 
+         BIC_4Orig  = log(n)*k_Orig  - (2*LogL_Orig)) -> AICTable
 
 
 knitr::kable(t(AICTable), digits = 1)
 
+
 knitr::kable(select(AICTable,FocalSp , starts_with('aic')), digits = 1)
+
+
+knitr::kable(select(AICTable,FocalSp , starts_with('BIC')), digits = 1)
 
 
 dfLL <- data.frame(LogLik = select(AICTable, starts_with('LogL')) %>%
                      summarise_all(sum) %>% t) 
 
 
-dfLL$n_params = c(84, 42, 78, 48)
+dfLL$n_params = c(42,48, 78,84 )
 
 dfLL %>%
   mutate( AIC= (2*n_params) - (2*LogLik) )
 
-
+select(AICTable, starts_with('aic')) %>% colSums
 ```
 
 # Full Posteriors
