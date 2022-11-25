@@ -2,9 +2,6 @@
 title: "Supplementary Methods 1"
 author: "Chris Terry"
 output:
-  html_document:
-    toc: yes
-    df_print: paged
   pdf_document:
     toc: yes
     number_sections: yes
@@ -248,7 +245,7 @@ FindFourAICs <- function(focalsp){
 }
 ```
 
-## AIC Tables
+## Model Comparison Tables
 ```{R warning = FALSE}
 AICTable<- map_df( spp_list, FindFourAICs) %>%
   left_join(count(seed_data, focal), c('FocalSp'='focal') )
@@ -272,12 +269,6 @@ knitr::kable(select(AICTable,FocalSp , starts_with('BIC')), digits = 1)
 dfLL <- data.frame(LogLik = select(AICTable, starts_with('LogL')) %>%
                      summarise_all(sum) %>% t) 
 
-
-dfLL$n_params = c(42,48, 78,84 )
-
-dfLL %>%
-  mutate( AIC= (2*n_params) - (2*LogLik) )
-
 select(AICTable, starts_with('aic')) %>% colSums
 ```
 
@@ -286,7 +277,9 @@ select(AICTable, starts_with('aic')) %>% colSums
 ### Which pair-directions to plot?
 ```{r}
 #get all the pairs where the fitness difference is above 1 in the wet plots----
-nls_boot_pairs$fd_superior <- ifelse(nls_boot_pairs$fd < 1, 1/nls_boot_pairs$fd, nls_boot_pairs$fd)
+nls_boot_pairs$fd_superior <- ifelse(nls_boot_pairs$fd < 1,
+                                     1/nls_boot_pairs$fd,
+                                     nls_boot_pairs$fd)
 nls_boot_pairs$fd_sup_sp <- ifelse(nls_boot_pairs$fd <= 1, 1, 2)
 nls_boot_pairs_sup <- nls_boot_pairs %>%filter(fd_sup_sp == 2 )
 W_superior <- with(nls_boot_pairs_sup, sp_pair[treatment==1])

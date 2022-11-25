@@ -179,7 +179,7 @@ pre code {
 <li><a href="#plotting-raw-data-with-model-best-fit">Plotting raw data with model best-fit</a></li>
 <li><a href="#fitting-set-of-models-with-different-levels-of-parameterisation">Fitting set of models with different levels of parameterisation</a>
 <ul>
-<li><a href="#aic-tables">AIC Tables</a></li>
+<li><a href="#model-comparison-tables">Model Comparison Tables</a></li>
 </ul></li>
 <li><a href="#full-posteriors">Full Posteriors</a>
 <ul>
@@ -412,8 +412,8 @@ FindFourAICs &lt;- function(focalsp){
   
   return(XX)
 }</code></pre>
-<div id="aic-tables" class="section level2">
-<h2>AIC Tables</h2>
+<div id="model-comparison-tables" class="section level2">
+<h2>Model Comparison Tables</h2>
 <pre class="r"><code>AICTable&lt;- map_df( spp_list, FindFourAICs) %&gt;%
   left_join(count(seed_data, focal), c(&#39;FocalSp&#39;=&#39;focal&#39;) )
 
@@ -706,17 +706,7 @@ knitr::kable(t(AICTable), digits = 1)</code></pre>
 <pre class="r"><code>dfLL &lt;- data.frame(LogLik = select(AICTable, starts_with(&#39;LogL&#39;)) %&gt;%
                      summarise_all(sum) %&gt;% t) 
 
-
-dfLL$n_params = c(42,48, 78,84 )
-
-dfLL %&gt;%
-  mutate( AIC= (2*n_params) - (2*LogLik) )</code></pre>
-<div data-pagedtable="false">
-<script data-pagedtable-source type="application/json">
-{"columns":[{"label":[""],"name":["_rn_"],"type":[""],"align":["left"]},{"label":["LogLik"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["n_params"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["AIC"],"name":[3],"type":["dbl"],"align":["right"]}],"data":[{"1":"-2305.038","2":"42","3":"4694.076","_rn_":"LogL_NoTre"},{"1":"-2280.846","2":"48","3":"4657.693","_rn_":"LogL_JustL"},{"1":"-2249.237","2":"78","3":"4654.474","_rn_":"LogL_JustA"},{"1":"-2240.943","2":"84","3":"4649.885","_rn_":"LogL_Orig"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
-  </script>
-</div>
-<pre class="r"><code>select(AICTable, starts_with(&#39;aic&#39;)) %&gt;% colSums</code></pre>
+select(AICTable, starts_with(&#39;aic&#39;)) %&gt;% colSums</code></pre>
 <pre><code>## aic_1NoTre aic_2JustL aic_3JustA  aic_4Orig 
 ##   4694.076   4657.693   4654.474   4649.885</code></pre>
 </div>
@@ -726,7 +716,9 @@ dfLL %&gt;%
 <div id="which-pair-directions-to-plot" class="section level3">
 <h3>Which pair-directions to plot?</h3>
 <pre class="r"><code>#get all the pairs where the fitness difference is above 1 in the wet plots----
-nls_boot_pairs$fd_superior &lt;- ifelse(nls_boot_pairs$fd &lt; 1, 1/nls_boot_pairs$fd, nls_boot_pairs$fd)
+nls_boot_pairs$fd_superior &lt;- ifelse(nls_boot_pairs$fd &lt; 1,
+                                     1/nls_boot_pairs$fd,
+                                     nls_boot_pairs$fd)
 nls_boot_pairs$fd_sup_sp &lt;- ifelse(nls_boot_pairs$fd &lt;= 1, 1, 2)
 nls_boot_pairs_sup &lt;- nls_boot_pairs %&gt;%filter(fd_sup_sp == 2 )
 W_superior &lt;- with(nls_boot_pairs_sup, sp_pair[treatment==1])
