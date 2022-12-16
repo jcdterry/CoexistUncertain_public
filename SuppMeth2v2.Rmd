@@ -1,0 +1,437 @@
+---
+title: "Supplementary Methods 2"
+author: "Chris Terry"
+output: 
+  pdf_document: 
+    toc: yes
+    number_sections: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+# Approach Summary
+
+This document is a knit `.rmd` file that works through the steps of the reanalysis of *Small rainfall changes drive substantial changes in plant coexistence* by Van Dyke et al 2022  (Nature), to support a 'Matters Arising' response. Original data from the authors is available at https://doi.org/10.5281/zenodo.7083314 
+
+The original authors report that '*reduced rainfall altered the relative strength of the competition coefficients more strongly than the differences in demographic potential (Fig 3)*'. To examine whether this observation could be entirely due to the increased uncertainty in estimates $\alpha$ terms  compared to $\lambda$ terms, I tested if this result can also be observed in a null model that does not have any impact of the drought treatment. 
+
+I first fit a seed production model in STAN using the `brms` R package. I used the same Beverton-Holt model structure $F_i \sim \lambda_i/(1+\alpha_{ii} N_i+\alpha_{ij} N_j )$ as the orginal authors, with the exception that the rainfall treatments were not differentiated. Again following the original model, the predictions and seed counts were fit on a log-transformed scale assuming Gaussian error. Priors were chosen to be as uninformative as possible, but were bounded to the same extent as the original author's model.  Each focal species was fit separately, and all models converged well. 
+
+From these models draws were taken from the posterior predictive distribution to generate simulated datasets of the same dimensions (e.g. number of samples per species and density combination), but without any 'true' distinction between treatments. These simulated datasets were then used in the original analysis pipeline using code from the original authors code repository. The background and justification of their methods is given in the original article. Briefly, the absolute value of the difference between treatments of  1) the ratio of the demographic potential of the two species , and 2) the ratio of competition coefficients are compared for each species pair with a t-test. 
+
+In the original analysis, the authors found that the difference between the treatments was larger in the competition coefficients than in the demographic potential (p = 0.044). Across a sample of 100 simulated datasets, I found this same result in 54 cases, despite there being no 'true' difference between the treatments. Combined with the lack of support for the treatment impacting the competition coefficients, this strongly suggests that the authors' conclusion is driven by the increased uncertainty in competition coefficients driving larger apparent changes. 
+
+# Loading data
+```{r message =FALSE, warning=FALSE}
+library(tidyverse)
+library(brms)
+library(posterior)
+library(broom)
+
+Path_to_Orig <- '../DroughtCompUncertainty/water_competition-2.0/Sedgwick_public/'
+
+nls_boot_pairs<-read.csv(paste0(Path_to_Orig,"output/nls_boot_pairs_1000_full_model.csv"))
+seed_data <- read.csv(paste0(Path_to_Orig,"data/drought_seed_production_data.csv"))
+
+seed_data$Tr <- ifelse(seed_data$treat == "W", 1, 2)
+seed_data <- seed_data %>% 
+  mutate( background = ifelse(is.na(background),# where 0 background, naming after focal
+                              focal, background)) 
+
+seed_data$N_acwr <- ifelse(seed_data$background == "ACWR", seed_data$num_comp, 0)
+seed_data$N_femi <- ifelse(seed_data$background == "FEMI", seed_data$num_comp, 0)
+seed_data$N_homu <- ifelse(seed_data$background == "HOMU", seed_data$num_comp, 0)
+seed_data$N_pler <- ifelse(seed_data$background == "PLER", seed_data$num_comp, 0)
+seed_data$N_saco <- ifelse(seed_data$background == "SACO", seed_data$num_comp, 0)
+seed_data$N_urli <- ifelse(seed_data$background == "URLI", seed_data$num_comp, 0)
+
+spp_list <- sort(na.omit( unique(seed_data$focal)))
+
+d = seed_data %>%
+  mutate( Log_Seeds = log(num_seeds),
+          Log_Comp = log(num_comp ), 
+          IsD = treat =='D', 
+          IsW = treat =='W')
+```
+
+# Fitting generative model 
+
+## Defining priors
+
+Priors are very loose and bounds follow the same as the original NLS model. Only major difference is that lambda is fit on a log10 scale. 
+
+```{r eval = FALSE}
+loose_priors_combined <-
+  prior(normal(3, 10), nlpar = "LOG10lambda", lb = 1, ub = 5) +
+  prior(normal(0, 10), nlpar = "aACWR",  lb = 0.001 )+
+  prior(normal(0, 10), nlpar = "aFEMI",  lb = 0.001)+
+  prior(normal(0, 10), nlpar = "aHOMU",  lb = 0.001)+
+  prior(normal(0, 10), nlpar = "aPLER",  lb = 0.001)+
+  prior(normal(0, 10), nlpar = "aSACO",  lb = 0.001)+
+  prior(normal(0, 10), nlpar = "aURLI",  lb = 0.001)
+```
+
+## Fitting generative model without treatment differences
+```{r eval = FALSE}
+model1_ACWR<-brm( bf(Log_Seeds~log((10^LOG10lambda)/(1+
+                                                        aACWR*N_acwr+
+                                                        aFEMI*N_femi+
+                                                        aHOMU*N_homu+
+                                                        aPLER*N_pler+
+                                                        aSACO*N_saco+
+                                                        aURLI*N_urli)),
+                                   LOG10lambda+aACWR+aFEMI+aHOMU+aPLER+aSACO+aURLI~1,
+                                   nl = TRUE), 
+                     data= filter(d, focal == 'ACWR'),
+                     prior = loose_priors_combined)
+                  
+                  ### Refit with different data for each different species. 
+                  model1_FEMI<- update(model1_ACWR,newdata = filter(d, focal == 'FEMI') )
+                  model1_HOMU<- update(model1_ACWR,newdata = filter(d, focal == 'HOMU') )
+                  model1_PLER<- update(model1_ACWR,newdata = filter(d, focal == 'PLER') )
+                  model1_SACO<- update(model1_ACWR,newdata = filter(d, focal == 'SACO') )
+                  model1_URLI<- update(model1_ACWR,newdata = filter(d, focal == 'URLI') )
+                  
+                  joint_model_list <- list(model1_ACWR,model1_FEMI,model1_HOMU,
+                                           model1_PLER,model1_SACO,model1_URLI)
+save(joint_model_list,file =  'joint_model_list2')
+
+### Gathering output summaries 
+bind_rows(model1_ACWR%>% summarise_draws() %>% mutate(focal = 'ACWR'),
+          model1_FEMI%>% summarise_draws() %>% mutate(focal = 'FEMI'),
+          model1_HOMU%>% summarise_draws() %>% mutate(focal = 'HOMU'),
+          model1_PLER%>% summarise_draws() %>% mutate(focal = 'PLER'),
+          model1_SACO%>% summarise_draws() %>% mutate(focal = 'SACO'),
+          model1_URLI%>% summarise_draws() %>% mutate(focal = 'URLI')) -> AllJointFits
+
+write_csv(AllJointFits, 'AllJointFits2.csv')
+```
+
+## Taking posteror draws
+
+```{R}
+set.seed(1)
+load(file = 'joint_model_list2')
+## Draw from posterior predictive distribution 
+##  (includes model uncertainty and residual error)
+predict_ACWR<- posterior_predict(joint_model_list[[1]], ndraws = 1000)
+predict_FEMI<- posterior_predict(joint_model_list[[2]], ndraws = 1000)
+predict_HOMU<- posterior_predict(joint_model_list[[3]], ndraws = 1000)
+predict_PLER<- posterior_predict(joint_model_list[[4]], ndraws = 1000)
+predict_SACO<- posterior_predict(joint_model_list[[5]], ndraws = 1000)
+predict_URLI<- posterior_predict(joint_model_list[[6]], ndraws = 1000)
+```
+
+## Function to rebuild data in original layout
+
+```{r}
+data_ACWR<- filter(d, focal == 'ACWR')
+data_FEMI<- filter(d, focal == 'FEMI')
+data_HOMU<- filter(d, focal == 'HOMU')
+data_PLER<- filter(d, focal == 'PLER')
+data_SACO<- filter(d, focal == 'SACO')
+data_URLI<- filter(d, focal == 'URLI')
+
+Gen_simData_fromfit <- function(i){
+  
+  data_ACWR$SIM_DATA <- predict_ACWR[i,]
+  data_FEMI$SIM_DATA <- predict_FEMI[i,]
+  data_HOMU$SIM_DATA <- predict_HOMU[i,]
+  data_PLER$SIM_DATA <- predict_PLER[i,]
+  data_SACO$SIM_DATA <- predict_SACO[i,]
+  data_URLI$SIM_DATA <- predict_URLI[i,]
+  
+  seed_data_WithSim <- bind_rows(data_ACWR,data_FEMI,
+                                 data_HOMU, data_PLER,
+                                 data_SACO,data_URLI)
+  
+  seed_data_WithSim$Simulation_i <- i
+  return(seed_data_WithSim)
+}
+
+```
+
+### Plotting distribution of 20 posterior draws compared to raw data
+
+```{r fig.height=8, fig.width=8}
+1:20 %>%
+  map_df(Gen_simData_fromfit) %>%
+  rename(Focal = focal, Background = background) %>%
+  arrange(num_comp)%>%
+  ggplot(aes( x =num_comp)) +
+  geom_point(aes(y = SIM_DATA), size = 0.1, alpha = 0.2)+
+  geom_point(aes(y = Log_Seeds, col = treat ), size = 1)+
+  facet_grid(Focal~Background, scales = 'free_x',
+             labeller= label_both)+
+  theme_light()+
+  xlab('Number of Competitors')+
+  ylab('Number of Seeds produced (log scale)')+
+  scale_color_manual(values=c('W' ="#4E84C4", 'D' = "#D16103"),
+                     name = "Treatment:", 
+                     labels = c("Ambient", "Reduced Rain"))+
+  theme(legend.position = 'bottom')
+```
+
+# Extracting parameters and key quantities from simulation data
+
+## Utility functions
+
+Code copies as closely as possible analyses in `nls_orig_data.R`. 
+
+```{r}
+##Calculate Stabilizing niche differences
+stabilizing_niche_diff_func <- function(df, species1, species2, treat) {
+  
+  aij <- with(df, alpha[focal == species1 & competitor == species2 & treatment== treat])
+  aji <- with(df, alpha[focal == species2 & competitor == species1 & treatment== treat])
+  ajj <- with(df, alpha[focal == species2 & competitor == species2 & treatment== treat])
+  aii <- with(df, alpha[focal == species1 & competitor == species1 & treatment== treat])
+  snd <- (1 - sqrt((aij * aji)/(ajj * aii)))
+  return(snd)
+}
+#eta_i equation function
+get_ni_func<- function(df, species, treat){
+  lambda <- with(df, lambda[ focal == species & treatment == treat])[1]
+  gi <- with( df, g[focal == species & treatment == treat ])[1]
+  si <- with( df, s[focal == species & treatment == treat])[1]
+  ni<- ((lambda*gi)/(1-((1-gi)*si)))
+  return(ni[1])
+}
+
+#Get fitness differences ------
+fitness_diff_func <- function(df, species1, species2, treat) {
+  
+  ni <- with(df, ni[focal == species1 & treatment == treat])[1]
+  nj <- with(df, ni[focal == species2 & treatment == treat])[1]
+  aij <- with(df, alpha[focal == species1 & competitor == species2 & treatment == treat ])
+  aji <- with(df, alpha[focal == species2 & competitor == species1 & treatment == treat])
+  ajj <- with(df, alpha[focal == species2 & competitor == species2 & treatment == treat])
+  aii <- with(df, alpha[focal == species1 & competitor == species1 & treatment == treat])
+  nn<- (nj-1)/(ni-1)
+  aa<- sqrt((aij * aii)/(ajj * aji))
+  FDij <- nn*aa
+  return(FDij[1])
+}
+```
+
+```{R}
+
+Calc_all_fit_sim<- function(seed_data_WithSim){
+  
+  spp_combos <- expand.grid(species = spp_list)
+  out <- list()
+  for( i in 1:nrow( spp_combos )){ 
+    temp_data <-filter(seed_data_WithSim, ### Now using simulated data 
+                       focal == spp_combos[i,1])
+    
+    fit_test<-NULL
+    try(
+      ###################   nb predicting SIM_DATA (log scale predicted seeds)
+      fit_test<- nls(SIM_DATA ~log(lambda[Tr]/(1+a_ACWR[Tr]*N_acwr+a_FEMI[Tr]*N_femi+
+                                                 a_HOMU[Tr]*N_homu+a_PLER[Tr]*N_pler+
+                                                 a_SACO[Tr]*N_saco+a_URLI[Tr]*N_urli)),
+                     data=temp_data, start=list('lambda'= c(100,100),
+                                                a_ACWR=c(0.1, 0.1), a_FEMI=c(0.1, 0.1),
+                                                a_HOMU=c(0.1, 0.1), a_PLER=c(0.1, 0.1),
+                                                a_SACO=c(0.1, 0.1),a_URLI=c(0.1, 0.1)),
+                     lower = c( 1, 1, rep(.001, 12) ),  
+                     upper = c(10000, 10000, rep(2, 12)), 
+                     control = list(maxiter = 100000),
+                     algorithm = 'port') 
+      
+    )
+    if(is.null(fit_test)){print('Converge Failed');print(temp_data);return(0)}
+    
+    df <- tidy(fit_test)
+    
+    df$focal <- spp_combos[i,1]
+    
+    df <- df %>% 
+      select(term , estimate, focal) %>% 
+      spread(term, estimate) %>%
+      pivot_longer( cols = starts_with("a"), 
+                    names_to = c("competitor","treatment"), 
+                    names_prefix = "a_", 
+                    names_sep = 4,
+                    values_to ="alpha"
+      )
+    
+    df$lambda<-ifelse(df$treatment == 1, df$lambda1, df$lambda2)
+    df$lambda1<-NULL
+    df$lambda2<-NULL
+    
+    out[[i]] <- df
+  }
+  
+  
+  all_fit <- do.call(rbind.data.frame, out)
+  all_fit$snd <- 0
+  
+  for(i in 1:nrow(all_fit)) {
+    sp1 <- all_fit[i, "focal"] %>% unlist
+    sp2 <- all_fit[i, "competitor"] %>% unlist
+    trt <- all_fit[i , "treatment"] %>% unlist
+    snd <- stabilizing_niche_diff_func(all_fit, sp1, sp2, trt)
+    all_fit[i, "snd"] <- snd
+  }
+  
+  ##Get eta_i-------
+  #seed survival and germination data
+  s_g_data <- read.csv(paste0(Path_to_Orig,"data/s_g_data.csv")) 
+  all_fit <- merge(all_fit, s_g_data, by = "focal")
+  all_fit$X<- NULL
+  all_fit$ni <- 0
+  for(i in 1:nrow(all_fit)) {
+    sp1 <- all_fit[i, "focal"] %>% unlist
+    trt <- all_fit[i , "treatment"] %>% unlist
+    ni <- get_ni_func(all_fit, sp1, trt)
+    all_fit[i, "ni"] <- ni
+  }
+  
+  #add fitness difference column to data frame
+  all_fit$fd <- 0
+  
+  for(i in 1:nrow(all_fit)) {
+    
+    sp1 <- all_fit[i, "focal"] %>% unlist
+    sp2 <- all_fit[i, "competitor"] %>% unlist
+    trt <- all_fit[i , "treatment"] %>% unlist
+    fitdif <- fitness_diff_func(all_fit, sp1, sp2, trt)
+    all_fit[i, "fd"] <- fitdif
+  }
+  
+  all_fit$focal <- as.character(all_fit$focal)
+  # identifying greater fitness difference
+  all_fit$fd_superior <- ifelse(all_fit$fd < 1, 1/all_fit$fd, all_fit$fd) 
+  all_fit$fd_sup_sp <- ifelse(all_fit$fd <= 1, all_fit$focal, all_fit$competitor)
+  
+  all_fit$coexist <- ifelse((all_fit$snd > (1-1/all_fit$fd_superior)), 1, 0 )
+  all_fit$sp_pair <- paste(all_fit$focal, all_fit$competitor, sep = "_")
+  
+  return(all_fit)
+}
+```
+
+## Testing analysis routes match
+
+Values won't match exactly as 'best-fit' compared to median of bootstrap, but are sufficiently close to be confident in approach. 
+```{R}
+d %>% 
+  mutate(SIM_DATA = log(num_seeds))%>%
+  Calc_all_fit_sim -> OrigData_newAnalysis
+
+OrigData_newAnalysis %>%
+  filter(focal =='PLER')%>%
+  arrange(competitor, treatment) %>%
+  select(sp_pair, treatment, alpha, lambda, fd, snd)
+
+nls_boot_pairs %>%
+  filter(focal =='PLER')%>%
+  arrange(competitor, treatment) %>%
+  select(sp_pair,treatment,  alpha, lambda, fd, snd)
+
+```
+
+# Repeating Analysis
+
+
+## Utility functions
+
+Code largely sourced from  `n_alpha_ratios.r`
+
+```{R}
+
+igr_change <-function(i, all_fit) { #invasion growth rate ratios
+  #Which ratio changes more in invasion growth rate inequality?
+  foc <- all_fit$focal[i]
+  comp <- all_fit$competitor[i]
+  
+  nj_D <- filter(all_fit,focal == comp & treatment == 2)$ni[1]
+  ni_D <- filter(all_fit,focal == foc & treatment == 2)$ni[1]
+  ajj_D <- filter(all_fit, focal == comp & competitor == comp & treatment == 2)$alpha
+  aij_D <- filter(all_fit, focal == foc & competitor == comp & treatment == 2)$alpha
+  n_ratio_D = log10((ni_D-1)/(nj_D-1))
+  a_ratio_D = log10(ajj_D/aij_D)
+  
+  nj_W <- filter(all_fit,focal == comp & treatment == 1)$ni[1]
+  ni_W <- filter(all_fit,focal == foc & treatment == 1)$ni[1]
+  ajj_W <- filter(all_fit, focal == comp & competitor == comp & treatment == 1)$alpha
+  aij_W<- filter(all_fit, focal == foc & competitor == comp & treatment == 1)$alpha
+  n_ratio_W = log10((ni_W-1)/(nj_W-1))
+  a_ratio_W = log10(ajj_W/aij_W)
+  
+  nc<-abs(n_ratio_W - n_ratio_D)
+  ac<-abs(a_ratio_W - a_ratio_D)
+  return(data.frame( 'focal' = foc,  'comp' = comp, 
+                     "n_ratio_DRY"=n_ratio_D,"a_ratio_DRY"= a_ratio_D,
+                     "n_ratio_WET"=n_ratio_W, "a_ratio_WET"= a_ratio_W,
+                     nc = nc, ac=ac))
+}
+
+
+Calc_t.test_ratiodiffs <- function(all_fit){
+  #if(all_fit==0){return(NULL)}
+  
+  total_pairs <- c("ACWR_FEMI", "ACWR_HOMU", "ACWR_PLER", "SACO_ACWR", "URLI_ACWR", 
+                   "HOMU_FEMI", "PLER_FEMI", "SACO_FEMI", "URLI_FEMI", "PLER_HOMU",
+                   "SACO_HOMU", "URLI_HOMU","SACO_PLER", "URLI_PLER", "URLI_SACO")
+  
+  ToCalc<- which(all_fit$sp_pair %in% total_pairs) ## only calc those needed
+  Comp_ratio_diffs <- map_df(ToCalc, igr_change, all_fit)
+  
+  Comp_ratio_diffs %>% 
+    filter(focal !=comp ) %>%
+    distinct(focal, comp, .keep_all = TRUE) %>%
+    mutate( sp_pairs = paste0(focal, '_', comp)) %>%
+    filter( sp_pairs %in% total_pairs) %>%
+    mutate( larger = ifelse(abs(ac)> abs(nc), "a", 'n')) -> data_for_test
+  
+  
+  t.test_out <- t.test(data_for_test$nc, data_for_test$ac, paired = T)
+  return(tidy(t.test_out))
+}
+
+```
+
+## Testing pipeline can reproduce original results
+
+Again, expect a slight difference between best fit and average of  bootstrap. But close enough to original paper's finding of p=0.044
+```{R}
+Calc_t.test_ratiodiffs(all_fit = OrigData_newAnalysis)  
+```
+
+## Replicating analysis on simulated data 
+
+```{r eval = FALSE}
+1:110 %>% # make slightly too many, so can discard those few that fail to converge
+  map(Gen_simData_fromfit)%>%
+  map(Calc_all_fit_sim)%>%
+  map_df(Calc_t.test_ratiodiffs )%>%
+  slice(1:100)-> t.test_FromSims_100
+
+write_csv(t.test_FromSims_100, 't.test_FromSims_100_2.csv') 
+# ^^ not very optimised so takes a few minutes to run
+```
+
+```{r message = FALSE}
+t.test_FromSims_100 <- read_csv('t.test_FromSims_100_2.csv')
+
+par(mfrow= c(1,2))
+hist(t.test_FromSims_100$p.value , main = 'Distribution of p-values')
+hist(t.test_FromSims_100$statistic , main = 'Distribution of estimated\ndifferences between groups' )
+mean(t.test_FromSims_100$p.value < 0.05)
+
+t.test_FromSims_100 %>%
+  count(statistic   <0 & p.value <0.05 )
+```
+
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+
+
+
