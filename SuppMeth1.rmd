@@ -1,6 +1,6 @@
 ---
-title: "Supplementary Methods 1"
-author: "Chris Terry"
+title: "Supplementary Methods 1 for 'Uncertain competition coefficients undermine inferences about coexistence'"
+author: "J. Christopher D. Terry"
 output:
   pdf_document:
     toc: yes

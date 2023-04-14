@@ -1,23 +1,32 @@
 ---
-title: "Supplementary Methods 2"
-author: "Chris Terry"
+title: "Supplementary Methods 2 for 'Uncertain competition coefficients undermine inferences about coexistence'"
+author: "J. Christopher D. Terry"
 output: 
   pdf_document: 
     toc: yes
     number_sections: yes
+    toc_depth: 4
+editor_options: 
+  chunk_output_type: console
 ---
 
-# Approach Summary
+# Introduction
 
-This document is a knit `.rmd` file that works through the steps of the reanalysis of *Small rainfall changes drive substantial changes in plant coexistence* by Van Dyke et al 2022  (Nature), to support a 'Matters Arising' response. Original data from the authors is available at https://doi.org/10.5281/zenodo.7083314 
+This document is the second of two knit `.rmd` files that works through the steps of the reanalysis of *Small rainfall changes drive substantial changes in plant coexistence* by Van Dyke et al 2022  (Nature), to support a 'Matters Arising' response. Original data from the authors is available at https://doi.org/10.5281/zenodo.7083314 
 
 The original authors report that '*reduced rainfall altered the relative strength of the competition coefficients more strongly than the differences in demographic potential (Fig 3)*'. To examine whether this observation could be entirely due to the increased uncertainty in estimates $\alpha$ terms  compared to $\lambda$ terms, I tested if this result can also be observed in a null model that does not have any impact of the drought treatment. 
 
-I first fit a seed production model in STAN using the `brms` R package. I used the same Beverton-Holt model structure $F_i \sim \lambda_i/(1+\alpha_{ii} N_i+\alpha_{ij} N_j )$ as the orginal authors, with the exception that the rainfall treatments were not differentiated. Again following the original model, the predictions and seed counts were fit on a log-transformed scale assuming Gaussian error. Priors were chosen to be as uninformative as possible, but were bounded to the same extent as the original author's model.  Each focal species was fit separately, and all models converged well. 
+In Section 3, I fit a seed production model in STAN using the `brms` R package. I used the same Beverton-Holt model structure $F_i \sim \lambda_i/(1+\alpha_{ii} N_i+\alpha_{ij} N_j )$ as the original authors, with the exception that the rainfall treatments were not differentiated. Again following the original model, the predictions and seed counts were fit on a log-transformed scale assuming Gaussian error. Priors were chosen to be as uninformative as possible, but were bounded to the same extent as the original author's model.  Each focal species was fit separately, and all models converged well. 
 
-From these models draws were taken from the posterior predictive distribution to generate simulated datasets of the same dimensions (e.g. number of samples per species and density combination), but without any 'true' distinction between treatments. These simulated datasets were then used in the original analysis pipeline using code from the original authors code repository. The background and justification of their methods is given in the original article. Briefly, the absolute value of the difference between treatments of  1) the ratio of the demographic potential of the two species , and 2) the ratio of competition coefficients are compared for each species pair with a t-test. 
+From these models draws were taken from the posterior predictive distribution to generate simulated datasets of the same dimensions (e.g. number of samples per species and density combination), but without any 'true' distinction between treatments. These simulated datasets were then used in the original analysis pipeline using code from the original authors code repository. The background and justification of their methods is given in the original article.
 
-In the original analysis, the authors found that the difference between the treatments was larger in the competition coefficients than in the demographic potential (p = 0.044). Across a sample of 100 simulated datasets, I found this same result in 54 cases, despite there being no 'true' difference between the treatments. Combined with the lack of support for the treatment impacting the competition coefficients, this strongly suggests that the authors' conclusion is driven by the increased uncertainty in competition coefficients driving larger apparent changes. 
+In Section 4, I show that the fraction of draws where pairs show a change in coexistence outcome between treatments for the best-fit models (despite their being no difference between treatments) as being around 23%, but with strong differences between pairs.
+
+In Section 5, I repeat the analysis shown in Fig.3 of the original article where a comparison is made between treatments of  1) the ratio of the demographic potential of the two species , and 2) the ratio of competition coefficients are compared for each species pair with a t-test. In the original analysis, the authors found that the difference between the treatments was larger in the competition coefficients than in the demographic potential (p = 0.044). Across a sample of 1000 simulated datasets, I found this same result in around half the cases, despite there being no 'true' difference between the treatments. 
+
+In Section 6, I subtract the average shifts observed in the null model from the observations, to generate a value for 'real' shifts caused by the treatment, and repeat the paired t-test examining the support for a greater shift in competition coefficient ratios over demographic potentials. This test does not find a significant difference. 
+
+Combined with the lack of support for the treatment impacting the competition coefficients, these analyses strongly suggests that the authors' conclusion of the dominant role of changes to competition coefficients is driven by the increased uncertainty in their estimation. 
 
 # Loading data
 ```{r message =FALSE, warning=FALSE}
@@ -25,6 +34,9 @@ library(tidyverse)
 library(brms)
 library(posterior)
 library(broom)
+library(cowplot)
+
+set.seed(1)
 
 Path_to_Orig <- '../DroughtCompUncertainty/water_competition-2.0/Sedgwick_public/'
 
@@ -33,8 +45,8 @@ seed_data <- read.csv(paste0(Path_to_Orig,"data/drought_seed_production_data.csv
 
 seed_data$Tr <- ifelse(seed_data$treat == "W", 1, 2)
 seed_data <- seed_data %>% 
-  mutate( background = ifelse(is.na(background),# where 0 background, naming after focal
-                              focal, background)) 
+  mutate( background = ifelse(is.na(background),
+                              focal, background)) # where 0 background, naming after focal
 
 seed_data$N_acwr <- ifelse(seed_data$background == "ACWR", seed_data$num_comp, 0)
 seed_data$N_femi <- ifelse(seed_data$background == "FEMI", seed_data$num_comp, 0)
@@ -43,6 +55,7 @@ seed_data$N_pler <- ifelse(seed_data$background == "PLER", seed_data$num_comp, 0
 seed_data$N_saco <- ifelse(seed_data$background == "SACO", seed_data$num_comp, 0)
 seed_data$N_urli <- ifelse(seed_data$background == "URLI", seed_data$num_comp, 0)
 
+
 spp_list <- sort(na.omit( unique(seed_data$focal)))
 
 d = seed_data %>%
@@ -50,7 +63,14 @@ d = seed_data %>%
           Log_Comp = log(num_comp ), 
           IsD = treat =='D', 
           IsW = treat =='W')
+
+total_pairs <- c("ACWR_FEMI", "ACWR_HOMU", "ACWR_PLER", "SACO_ACWR", "URLI_ACWR", 
+                 "HOMU_FEMI", "PLER_FEMI", "SACO_FEMI", "URLI_FEMI", "PLER_HOMU",
+                 "SACO_HOMU", "URLI_HOMU","SACO_PLER", "URLI_PLER", "URLI_SACO")
+
 ```
+
+
 
 # Fitting generative model 
 
@@ -71,17 +91,17 @@ loose_priors_combined <-
 
 ## Fitting generative model without treatment differences
 ```{r eval = FALSE}
-model1_ACWR<-brm( bf(Log_Seeds~log(((10^LOG10lambda)+(10^LOG10lambda))/(1+
-                                                                          aACWR*N_acwr+
-                                                                          aFEMI*N_femi+
-                                                                          aHOMU*N_homu+
-                                                                          aPLER*N_pler+
-                                                                          aSACO*N_saco+
-                                                                          aURLI*N_urli)),
-                     LOG10lambda+aACWR+aFEMI+aHOMU+aPLER+aSACO+aURLI~1,
-                     nl = TRUE), 
-                  data= filter(d, focal == 'ACWR'),
-                  prior = loose_priors_combined)
+model1_ACWR<-brm( bf(Log_Seeds~log((10^LOG10lambda)/(1+
+                                                        aACWR*N_acwr+
+                                                        aFEMI*N_femi+
+                                                        aHOMU*N_homu+
+                                                        aPLER*N_pler+
+                                                        aSACO*N_saco+
+                                                        aURLI*N_urli)),
+                  LOG10lambda+aACWR+aFEMI+aHOMU+aPLER+aSACO+aURLI~1,
+                  nl = TRUE), 
+data= filter(d, focal == 'ACWR'),
+prior = loose_priors_combined)
 
 ### Refit with different data for each different species. 
 model1_FEMI<- update(model1_ACWR,newdata = filter(d, focal == 'FEMI') )
@@ -92,7 +112,7 @@ model1_URLI<- update(model1_ACWR,newdata = filter(d, focal == 'URLI') )
 
 joint_model_list <- list(model1_ACWR,model1_FEMI,model1_HOMU,
                          model1_PLER,model1_SACO,model1_URLI)
-save(joint_model_list,file =  'joint_model_list')
+save(joint_model_list,file =  'joint_model_list2')
 
 ### Gathering output summaries 
 bind_rows(model1_ACWR%>% summarise_draws() %>% mutate(focal = 'ACWR'),
@@ -109,7 +129,7 @@ write_csv(AllJointFits, 'AllJointFits.csv')
 
 ```{R}
 set.seed(1)
-load(file = 'joint_model_list')
+load(file = 'joint_model_list2')
 ## Draw from posterior predictive distribution 
 ##  (includes model uncertainty and residual error)
 predict_ACWR<- posterior_predict(joint_model_list[[1]], ndraws = 1000)
@@ -149,30 +169,7 @@ Gen_simData_fromfit <- function(i){
 
 ```
 
-### Plotting distribution of 20 posterior draws compared to raw data
-
-```{r fig.height=8, fig.width=8}
-1:20 %>%
-  map_df(Gen_simData_fromfit) %>%
-  rename(Focal = focal, Background = background) %>%
-  arrange(num_comp)%>%
-  ggplot(aes( x =num_comp)) +
-  geom_point(aes(y = SIM_DATA), size = 0.1, alpha = 0.2)+
-  geom_point(aes(y = Log_Seeds, col = treat ), size = 1)+
-  facet_grid(Focal~Background, scales = 'free_x',
-             labeller= label_both)+
-  theme_light()+
-  xlab('Number of Competitors')+
-  ylab('Number of Seeds produced (log scale)')+
-  scale_color_manual(values=c('W' ="#4E84C4", 'D' = "#D16103"),
-                     name = "Treatment:", 
-                     labels = c("Ambient", "Reduced Rain"))+
-  theme(legend.position = 'bottom')
-```
-
-# Extracting parameters and key quantities from simulation data
-
-## Utility functions
+## Utility functions to extract parameters and key quantities from simulation data
 
 Code copies as closely as possible analyses in `nls_orig_data.R`. 
 
@@ -213,7 +210,6 @@ fitness_diff_func <- function(df, species1, species2, treat) {
 ```
 
 ```{R}
-
 Calc_all_fit_sim<- function(seed_data_WithSim){
   
   spp_combos <- expand.grid(species = spp_list)
@@ -310,35 +306,60 @@ Calc_all_fit_sim<- function(seed_data_WithSim){
 }
 ```
 
-## Testing analysis routes match
+## Taking draws from generative model
 
-Values won't match exactly as 'best-fit' compared to median of bootstrap, but are sufficiently close to be confident in approach. 
-```{R}
-d %>% 
-  mutate(SIM_DATA = log(num_seeds))%>%
-  Calc_all_fit_sim -> OrigData_newAnalysis
+```{r eval = FALSE}
+1:1000 %>% ## about 16 fail to converge
+  map(Gen_simData_fromfit)%>%
+  map(Calc_all_fit_sim) -> List_Null_Fits
 
-OrigData_newAnalysis %>%
-  filter(focal =='PLER')%>%
-  arrange(competitor, treatment) %>%
-  select(sp_pair, treatment, alpha, lambda, fd, snd)
-
-nls_boot_pairs %>%
-  filter(focal =='PLER')%>%
-  arrange(competitor, treatment) %>%
-  select(sp_pair,treatment,  alpha, lambda, fd, snd)
+save(List_Null_Fits, file='List_Null_Fits')
 
 ```
 
-# Repeating Analysis
+```{r}
+load('List_Null_Fits')
+```
 
 
-## Utility functions
+# What is the assigned probability of a coexistence shift being 'observed' when no real effect at all?
 
-Code largely sourced from  `n_alpha_ratios.r`
+Using data derived from the no-treatment null model, what proportion of species pairs change coexistence prediction?
+
+```{r}
+
+Calc_if_shiftprediction <- function(all_fit){
+  if(!is.data.frame(all_fit)){return(NULL)}
+  
+  all_fit %>%
+    filter(sp_pair %in% total_pairs) %>%
+    group_by(sp_pair)%>%
+    summarise(ChangeCoexist = sum(coexist)==1 ) -> PairsChangeCoexist
+  ## ^^^ NB this doesn't include cases where the winning species changes
+  
+  return(PairsChangeCoexist)
+}
+
+List_Null_Fits %>%
+  map_df(Calc_if_shiftprediction, .id = 'Rep')-> PredictedChangesFromNull
+
+PredictedChangesFromNull %>%
+  group_by(sp_pair) %>%
+  summarise(Frac_ChangeCoexist =mean(ChangeCoexist)) %>%
+  arrange(Frac_ChangeCoexist)
+
+PredictedChangesFromNull %>%
+  summarise(Frac_ChangeCoexist =mean(ChangeCoexist))
+
+```
+
+# Repeating original Figure 3 analysis on draws from null model
+
+This test is to identify the probability of seeing the significantly larger effect of changes to competition coefficients over demographic potentials (a result described in the original paper) in a null model that has no treatment effects.
+
+Code sourced where possible from `n_alpha_ratios.r` by the original authors. 
 
 ```{R}
-
 igr_change <-function(i, all_fit) { #invasion growth rate ratios
   #Which ratio changes more in invasion growth rate inequality?
   foc <- all_fit$focal[i]
@@ -366,14 +387,10 @@ igr_change <-function(i, all_fit) { #invasion growth rate ratios
                      nc = nc, ac=ac))
 }
 
-
 Calc_t.test_ratiodiffs <- function(all_fit){
-  if(all_fit==0){return(NULL)}
-  
-  total_pairs <- c("ACWR_FEMI", "ACWR_HOMU", "ACWR_PLER", "SACO_ACWR", "URLI_ACWR", 
-                   "HOMU_FEMI", "PLER_FEMI", "SACO_FEMI", "URLI_FEMI", "PLER_HOMU",
-                   "SACO_HOMU", "URLI_HOMU","SACO_PLER", "URLI_PLER", "URLI_SACO")
-  
+print('i')
+    if(!is.data.frame(all_fit)){return(NULL)}
+
   ToCalc<- which(all_fit$sp_pair %in% total_pairs) ## only calc those needed
   Comp_ratio_diffs <- map_df(ToCalc, igr_change, all_fit)
   
@@ -391,39 +408,155 @@ Calc_t.test_ratiodiffs <- function(all_fit){
 
 ```
 
-## Testing pipeline can reproduce original results
+### Testing pipeline can reproduce original results
 
-Again, expect a slight difference between best fit and average of  bootstrap. But close enough to original paper's finding of p=0.044
+Expect a slight difference between best fit and average of  bootstrap. But close enough to original paper's finding of p=0.044 to be confident it is ok.
 ```{R}
-Calc_t.test_ratiodiffs(OrigData_newAnalysis)  
+d %>% 
+  mutate(SIM_DATA = log(num_seeds))%>%
+  Calc_all_fit_sim -> OrigData_newAnalysis
+Calc_t.test_ratiodiffs(all_fit = OrigData_newAnalysis)  
 ```
 
 ## Replicating analysis on simulated data 
 
 ```{r eval = FALSE}
-1:110 %>% # make slightly too many, so can discard those few that fail to converge
-  map(Gen_simData_fromfit)%>%
-  map(Calc_all_fit_sim)%>%
-  map_df(Calc_t.test_ratiodiffs )%>%
-  slice(1:100)-> t.test_FromSims_100
+List_Null_Fits%>%
+  map_df(Calc_t.test_ratiodiffs )-> t.test_FromSims_1000
 
-write_csv(t.test_FromSims_100, 't.test_FromSims_100.csv') 
-# ^^ not very optimised so takes a few minutes to run
+write_csv(t.test_FromSims_1000, 't.test_FromSims_1000.csv') 
+# ^^ not very optimised so takes nearly an hour to run
 ```
 
 ```{r message = FALSE}
-t.test_FromSims_100 <- read_csv('t.test_FromSims_100.csv')
+t.test_FromSims_1000 <- read_csv('t.test_FromSims_1000.csv')
+mean(t.test_FromSims_1000$p.value < 0.05)
 
-par(mfrow= c(1,2))
-hist(t.test_FromSims_100$p.value , main = 'Distribution of p-values')
-hist(t.test_FromSims_100$statistic , main = 'Distribution of estimated\ndifferences between groups' )
-mean(t.test_FromSims_100$p.value < 0.05)
-
-t.test_FromSims_100 %>%
+t.test_FromSims_1000 %>%
   count(statistic   <0 & p.value <0.05 )
 ```
 
+# Using the null model to account for differential uncertainty in the two quantities.
 
+```{R}
+
+ChangeInLogRatio <- function(pairwiseValues){
+  ## Calculate change in log_ratio of demographic potentials log_10[(\eta_j -1)/(\eta_i -1)]
+  
+  if(!is.data.frame(pairwiseValues)){return(NULL)}
+  ## Get alpha_jj
+  IntraAlpha = pairwiseValues %>%
+    filter(   focal== competitor  ) %>%
+    select( spp_j = focal, treatment, alpha_jj = alpha)
+  
+  ## Get eta_j
+  Competitor_demo = pairwiseValues %>%
+    filter(   focal== competitor  ) %>%
+    select(  spp_j = focal, treatment, eta_j = ni)
+  
+  
+  Ratios = pairwiseValues %>%
+    filter(   focal != competitor  ) %>%
+    rename( eta_i = ni, spp_i= focal, spp_j=competitor, alpha_ij = alpha) %>%
+    left_join(IntraAlpha, by = c("spp_j", "treatment")) %>% 
+    left_join(Competitor_demo, by = c("spp_j", "treatment")) %>%
+    select(-(lambda:s), -(fd:coexist) ) %>%
+    mutate( LR_demo= log10((eta_i   -1)/ ( eta_j-1)),
+            LR_intc = log10(alpha_jj / alpha_ij))
+  return(Ratios)
+}
+
+List_Null_Fits%>%
+  map_df(ChangeInLogRatio, .id = 'rep') %>%
+  group_by(rep, sp_pair)%>%
+  summarise(alpha_ij_shift = abs(diff(alpha_ij)),
+            alpha_jj_shift = abs(diff(alpha_jj)),
+            Demo_shift = abs(diff(LR_demo)),
+            Intc_shift = abs(diff(LR_intc))) -> Null_Shifts
+
+```
+
+### Shifts in the real data
+```{r}
+d %>% 
+  mutate(SIM_DATA = log(num_seeds))%>%
+  Calc_all_fit_sim %>%
+  ChangeInLogRatio-> OrigData_RatioResults
+
+OrigData_RatioResults %>%
+  group_by(sp_pair)%>%
+  summarise(alpha_ij_shift = abs(diff(alpha_ij)),
+            alpha_jj_shift = abs(diff(alpha_jj)),
+            Demo_shift = abs(diff(LR_demo)),
+            Intc_shift = abs(diff(LR_intc))) -> OrigData_Shifts
+
+```
+
+## Repeating t-test (with correction) of whether across the 15 pairs competition is larger than changes in demographic potential. 
+
+```{r}
+### Calculate mean shifts for each pair across the null:
+Null_Shifts %>%
+  group_by(sp_pair) %>%
+  summarise(Null_Mean_Demo_Shift = mean(Demo_shift),
+            Null_Mean_Intc_Shift = mean(Intc_shift)) -> Null_Pair_means
+
+## Calculate 'excess' change by subtracting off the mean seen in the null model
+OriginalData <- read_csv('spp_comp_combos.csv') ## as generated by original paper `n_alpha_ratios.R`
+
+OriginalData %>%
+  filter(sp_pair %in% total_pairs) %>%
+  left_join(Null_Pair_means, by = "sp_pair") %>%
+  mutate( Demo_NullExcess =   n_change  - Null_Mean_Demo_Shift,
+          Intc_NullExcess = a_change  - Null_Mean_Intc_Shift,
+          Intc_Greater = Intc_NullExcess>Demo_NullExcess) %>%
+  as.data.frame() -> WhichShiftGeater_df
+
+## Original t-test 
+t.test(WhichShiftGeater_df$n_change ,
+       WhichShiftGeater_df$a_change , paired = TRUE) 
+
+## t-test correcting for extra variation:
+t.test(WhichShiftGeater_df$Demo_NullExcess,
+       WhichShiftGeater_df$Intc_NullExcess, paired = TRUE ) 
+
+
+```
+
+
+```{r fig.height=5, fig.width=10}
+WhichShiftGeater_df %>%
+  select( sp_pair,
+          `Demographic Potential` =n_change,
+          `Competition Coefficients`=a_change) %>%
+  pivot_longer(-sp_pair, 
+               names_to = 'Component', 
+               values_to = 'Difference')%>%
+  ggplot( aes( y= `Difference`, x = Component))+
+  # geom_boxplot(fill = 'grey')+
+  geom_line(aes(group=sp_pair))+
+  geom_point()+
+  coord_cartesian(ylim = c(0,1))+
+  theme_minimal()-> Original_ApproachPlot
+
+WhichShiftGeater_df %>%
+  select( sp_pair,
+          `Demographic Potential` =Demo_NullExcess,
+          `Competition Coefficients`=Intc_NullExcess) %>%
+  pivot_longer(-sp_pair, 
+               names_to = 'Component', 
+               values_to = 'Excess Difference')%>%
+  ggplot( aes( y= `Excess Difference`, x = Component))+
+  # geom_boxplot(fill = 'grey')+
+  geom_line(aes(group=sp_pair))+
+  geom_point()+
+  theme_minimal()-> CorrectedApproachPlot
+plot_grid(Original_ApproachPlot, CorrectedApproachPlot,
+          labels = c('a) Original comparison',
+                     'b) Corrected for differential uncertainty' ),
+          hjust = -0.1, scale= 0.9)
+
+```
 
 # Session Information
 
