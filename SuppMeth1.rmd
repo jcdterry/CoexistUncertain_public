@@ -1,5 +1,6 @@
 ---
-title: "Supplementary Methods 1 for 'Uncertain competition coefficients undermine inferences about coexistence'"
+title: Supplementary Methods 1 for 'Uncertain competition coefficients undermine inferences
+  about coexistence'
 author: "J. Christopher D. Terry"
 output:
   pdf_document:
@@ -216,8 +217,8 @@ FindFourAICs <- function(focalsp){
                        algorithm = 'port')
   
   fit_test_justLam<- nls(log(num_seeds)~log(lambda[Tr]/(1+a_ACWR*N_acwr+a_FEMI*N_femi+
-                                                      a_HOMU*N_homu+a_PLER*N_pler+
-                                                      a_SACO*N_saco+a_URLI*N_urli)),
+                                                          a_HOMU*N_homu+a_PLER*N_pler+
+                                                          a_SACO*N_saco+a_URLI*N_urli)),
                          data=focal_data,
                          start=list('lambda'= c(100,100),a_ACWR=c(0.1), a_FEMI=c(0.1), 
                                     a_HOMU=c(0.1), a_PLER=c(0.1),
@@ -415,8 +416,8 @@ pars_boot_wide<-pivot_wider(data = pars_boot,
 ```{r}
 spp_treat_boot_combos %>%
   filter(sp_pair %in% PairsToPlot) %>%
-  mutate(fd_superior <- ifelse(fd < 1, 1/fd,fd) ,
-         fd_sup_sp <- ifelse(fd <= 1, 1, 2),
+  mutate(fd_superior = ifelse(fd < 1, 1/fd,fd) ,
+         fd_sup_sp = ifelse(fd <= 1, 1, 2),
          coexist = ifelse((snd > (1-1/fd_superior)), 1, 0 ),
          outcome = ifelse(coexist == 1, "coexist",
                           ifelse(fd_sup_sp == 2, 
@@ -451,20 +452,86 @@ JoinResults$OriginalFindsChange <- JoinResults$outcome_1 != JoinResults$outcome_
 # If change from coexist -> victory, probability observe change =  prob(coexist1) * 1-prob(coexist)
 
 JoinResults %>%
-  filter(OriginalFindsChange) %>%
-  mutate(LikelihoodObserveChange = ifelse(outcome_1 == 'coexist',
-                                          WET *(1-DRY),
-                                          (1-WET)*DRY)) %>%
-  select(SpeciesPair =species, 
-         LikelihoodCoexist_Wet= WET,
-         LikelihoodCoexist_Dry = DRY,
-         outcome_Wet=outcome_1, outcome_Dry=outcome_2,
-         LikelihoodObserveChange )-> JoinResults2
+  #filter(OriginalFindsChange) %>%
+  mutate(LK_ObserveChange = ifelse(outcome_1 == 'coexist',
+                                   WET *(1-DRY),
+                                   (1-WET)*DRY),
+         LK_CoexistBoth = WET*DRY,
+         LK_NoCoexistBoth = (1-WET)*(1-DRY),
+         LK_ObserveInverseChange = ifelse(outcome_1 == 'coexist',
+                                          (1-WET)*DRY,
+                                          WET *(1-DRY)),
+         CHECK= LK_ObserveChange+LK_CoexistBoth+LK_NoCoexistBoth+LK_ObserveInverseChange) %>%
+  mutate( MostLikelyNonChange = ifelse( LK_CoexistBoth>LK_NoCoexistBoth,
+                                        LK_CoexistBoth,LK_NoCoexistBoth ),
+          MostLikelyChange = ifelse( LK_ObserveChange >LK_ObserveInverseChange,
+                                     LK_ObserveChange,LK_ObserveInverseChange ))%>%
+  arrange(desc(MostLikelyChange))%>%
+  select(SpeciesPair =species, WET,DRY,
+         #   starts_with('LK'),
+         MostLikelyChange, MostLikelyNonChange , 
+         outcome_Wet=outcome_1, outcome_Dry=outcome_2 )-> JoinResults2
 
 knitr::kable(JoinResults2,digits =3)
 
-JoinResults2$LikelihoodObserveChange %>% mean
 ```
+
+
+```{R}
+## NB the very small number of priority effects are being effectively ignored here (assigned to a win for the fitter species)
+
+PosteriorResults %>%
+  mutate( Treatment = ifelse(treatment ==1, 'WET', 'DRY'))%>%
+  ungroup()%>%
+  select( -treatment) %>%
+  group_by(sp_pair, Treatment) %>% 
+  pivot_longer(names_to = 'Outcome', cols = `ACWR wins` :`FEMI wins` ) %>%
+  ungroup()->Draws
+
+Dry_Draws<- filter(Draws, Treatment == 'DRY', value>0) %>% rename( Dry_Outcome = Outcome, Dry_draws = value)
+Wet_Draws<- filter(Draws, Treatment == 'WET', value>0) %>% rename( Wet_Outcome = Outcome, Wet_draws = value)
+
+full_join( Wet_Draws,Dry_Draws,
+           by = 'sp_pair', relationship = "many-to-many") %>%
+  select(-Treatment.x, -Treatment.y) %>%
+  mutate( comb_prob = (Dry_draws/1000) * (Wet_draws/1000)  )%>%
+  arrange( sp_pair, desc(comb_prob)) -> All_OutcomePaths
+
+All_OutcomePaths
+
+All_OutcomePaths %>%
+  group_by(sp_pair) %>%
+  mutate(rank = 1:n()) %>%
+  filter(rank <3) %>%
+  select( -Wet_draws, - Dry_draws) %>%
+  pivot_wider( id_cols = sp_pair,
+               values_from = c(Wet_Outcome,Dry_Outcome,comb_prob ),
+               names_from = rank) %>%
+  mutate(ChangeIdentified = Wet_Outcome_1!=Dry_Outcome_1 ) %>%
+  select( sp_pair , ChangeIdentified,  ### ReOrdering Columns
+          Wet_Outcome_1 , Dry_Outcome_1, comb_prob_1, 
+          Wet_Outcome_2 ,  Dry_Outcome_2,   comb_prob_2)%>%
+  arrange( desc(ChangeIdentified) , desc(comb_prob_1  )) -> TopTwoMostLikelyOutcomes
+
+
+knitr::kable(select(TopTwoMostLikelyOutcomes,
+                    -ChangeIdentified),
+             digits =3, format = 'latex', booktabs = TRUE) %>%
+          kableExtra::kable_styling(latex_options = "scale_down")
+
+TopTwoMostLikelyOutcomes %>%
+  filter( ChangeIdentified) %>%
+  mutate(RelProb = comb_prob_1 /comb_prob_2 ) %>%
+  ungroup %>%summarise( mean(RelProb), mean(comb_prob_1))
+
+
+
+## Checker:
+All_OutcomePaths %>%group_by(sp_pair) %>%summarise(sum(comb_prob)) 
+```
+
+
+
 
 
 # Session Info

@@ -26,6 +26,8 @@ In Section 5, I repeat the analysis shown in Fig.3 of the original article where
 
 In Section 6, I subtract the average shifts observed in the null model from the observations, to generate a value for 'real' shifts caused by the treatment, and repeat the paired t-test examining the support for a greater shift in competition coefficient ratios over demographic potentials. This test does not find a significant difference. 
 
+In Section 7 I use the null model as a direct reference to compare the observed data against. This test also does not find a significant difference. Note that this section was written following a draft reply written by the original authors that conducted a similar analysis, but which has certain key issues. As such in this section I also demonstrate the necessity of a sufficiently large set of null model draws and carefully ordering the averaging operations within the overall analysis.
+
 Combined with the lack of support for the treatment impacting the competition coefficients, these analyses strongly suggests that the authors' conclusion of the dominant role of changes to competition coefficients is driven by the increased uncertainty in their estimation. 
 
 # Loading data
@@ -92,16 +94,16 @@ loose_priors_combined <-
 ## Fitting generative model without treatment differences
 ```{r eval = FALSE}
 model1_ACWR<-brm( bf(Log_Seeds~log((10^LOG10lambda)/(1+
-                                                        aACWR*N_acwr+
-                                                        aFEMI*N_femi+
-                                                        aHOMU*N_homu+
-                                                        aPLER*N_pler+
-                                                        aSACO*N_saco+
-                                                        aURLI*N_urli)),
-                  LOG10lambda+aACWR+aFEMI+aHOMU+aPLER+aSACO+aURLI~1,
-                  nl = TRUE), 
-data= filter(d, focal == 'ACWR'),
-prior = loose_priors_combined)
+                                                       aACWR*N_acwr+
+                                                       aFEMI*N_femi+
+                                                       aHOMU*N_homu+
+                                                       aPLER*N_pler+
+                                                       aSACO*N_saco+
+                                                       aURLI*N_urli)),
+                     LOG10lambda+aACWR+aFEMI+aHOMU+aPLER+aSACO+aURLI~1,
+                     nl = TRUE), 
+                  data= filter(d, focal == 'ACWR'),
+                  prior = loose_priors_combined)
 
 ### Refit with different data for each different species. 
 model1_FEMI<- update(model1_ACWR,newdata = filter(d, focal == 'FEMI') )
@@ -388,10 +390,10 @@ igr_change <-function(i, all_fit) { #invasion growth rate ratios
 }
 
 Calc_t.test_ratiodiffs <- function(all_fit){
-print('i')
-    if(!is.data.frame(all_fit)){return(NULL)}
-
-  ToCalc<- which(all_fit$sp_pair %in% total_pairs) ## only calc those needed
+  print('i')
+  if(!is.data.frame(all_fit)){return(NULL)}
+  
+  ToCalc<- which(all_fit$sp_pair %in% total_pairs) ## only calc those needed. Keeps selected pairs constant
   Comp_ratio_diffs <- map_df(ToCalc, igr_change, all_fit)
   
   Comp_ratio_diffs %>% 
@@ -488,7 +490,8 @@ OrigData_RatioResults %>%
   summarise(alpha_ij_shift = abs(diff(alpha_ij)),
             alpha_jj_shift = abs(diff(alpha_jj)),
             Demo_shift = abs(diff(LR_demo)),
-            Intc_shift = abs(diff(LR_intc))) -> OrigData_Shifts
+            Intc_shift = abs(diff(LR_intc)))%>%
+  mutate(diff = Intc_shift-Demo_shift )-> OrigData_Shifts
 
 ```
 
@@ -557,6 +560,442 @@ plot_grid(Original_ApproachPlot, CorrectedApproachPlot,
           hjust = -0.1, scale= 0.9)
 
 ```
+
+
+# Using Null Model as a reference distribution 
+
+A more direct approach to testing the statistical significance of an observation compared to a null model is to examine the where on the distribution of the null model draws the data lies. This approach was developed by Van Dyke et al. in a draft reply of theirs to an earlier draft of this Matters Arising, but as I detail below included certain analysis issues. Where possible, the code in this section follows that included in the Supplementary Materials associated with the second draft of Van Dyke et al's reply to the Matters Arising (May 2023).
+
+## Generating a larger set of null model draws
+
+While 1000 draws was enough for estimating a mean for the subtraction approach, for this approach a larger null model draw is necessary (see section below). This requires a larger set of draws from the Bayesian model, but otherwise all steps are the same as above.
+
+```{r eval = FALSE}
+model1_ACWR<-brm( bf(Log_Seeds~log((10^LOG10lambda)/(1+
+                                                       aACWR*N_acwr+
+                                                       aFEMI*N_femi+
+                                                       aHOMU*N_homu+
+                                                       aPLER*N_pler+
+                                                       aSACO*N_saco+
+                                                       aURLI*N_urli)),
+                     LOG10lambda+aACWR+aFEMI+aHOMU+aPLER+aSACO+aURLI~1,
+                     nl = TRUE), 
+                  iter = 21000,
+                  data= filter(d, focal == 'ACWR'),
+                  prior = loose_priors_combined)
+
+### Refit with different data for each different species. 
+model1_FEMI<- update(model1_ACWR,newdata = filter(d, focal == 'FEMI') )
+model1_HOMU<- update(model1_ACWR,newdata = filter(d, focal == 'HOMU') )
+model1_PLER<- update(model1_ACWR,newdata = filter(d, focal == 'PLER') )
+model1_SACO<- update(model1_ACWR,newdata = filter(d, focal == 'SACO') )
+model1_URLI<- update(model1_ACWR,newdata = filter(d, focal == 'URLI') )
+
+joint_model_list <- list(model1_ACWR,model1_FEMI,model1_HOMU,
+                         model1_PLER,model1_SACO,model1_URLI)
+save(joint_model_list,file =  'joint_model_list2_10000')
+
+## Taking posteror draws
+set.seed(1)
+load(file = 'joint_model_list2_10000')
+## Draw from posterior predictive distribution (includes model uncertainty and residual error)
+predict_ACWR<- posterior_predict(joint_model_list[[1]], ndraws = 10500)
+predict_FEMI<- posterior_predict(joint_model_list[[2]], ndraws = 10500)
+predict_HOMU<- posterior_predict(joint_model_list[[3]], ndraws = 10500)
+predict_PLER<- posterior_predict(joint_model_list[[4]], ndraws = 10500)
+predict_SACO<- posterior_predict(joint_model_list[[5]], ndraws = 10500)
+predict_URLI<- posterior_predict(joint_model_list[[6]], ndraws = 10500)
+## Taking draws from generative model
+1:10500 %>% 
+  map(Gen_simData_fromfit)%>%
+  map(Calc_all_fit_sim) -> List_Null_Fits
+
+List_Null_Fits<- List_Null_Fits[List_Null_Fits != "0"]
+#remove ones that did not converge and take 10k
+List_Null_Fits10k<- List_Null_Fits[c(1:10000)]
+save(List_Null_Fits10k, file='List_Null_Fits10k')
+```
+
+## Comparing data to null distribution
+
+### Calculating key quantitites for null model set
+
+```{r}
+load(file='List_Null_Fits10k')
+
+List_Null_Fits10k%>%
+  map_df(ChangeInLogRatio, .id = 'rep') %>%
+  group_by(rep, sp_pair)%>%
+  summarise(alpha_ij_shift = abs(diff(alpha_ij)), ## calculate difference betwee treatments
+            alpha_jj_shift = abs(diff(alpha_jj)),
+            Demo_shift = abs(diff(LR_demo)),
+            Intc_shift = abs(diff(LR_intc))) -> Null_Shifts10k
+
+Null_Shifts10k %>%
+  group_by(sp_pair) %>%
+  summarise(Null_Mean_Demo_Shift = mean(Demo_shift),
+            Null_Mean_Intc_Shift = mean(Intc_shift)) -> Null10k_SpMeans
+
+Null_Shifts10k %>%
+  filter(sp_pair %in% total_pairs) %>%
+  group_by(rep) %>%
+  summarise(mean_a_change = mean(Intc_shift),
+            mean_n_change = mean(Demo_shift), 
+            diff = mean(Intc_shift-Demo_shift)) -> Null10k_CrossSpeciesMeans
+```
+
+### Comparing best-fit values to to null distribution to calculate p-value
+
+```{r}
+OrigData_Shifts %>% 
+  filter(sp_pair %in% total_pairs) %>%
+  mutate( DiffShifts =   Intc_shift-Demo_shift)  %>%
+  summarise(MeanDemo_shift    = mean(Demo_shift),
+            MeanIntc_shift    = mean(Intc_shift),
+            MeanDiffShift = mean(DiffShifts)) -> BestFitDifferences
+
+## Difference 
+Null10k_CrossSpeciesMeans  %>%
+  ggplot( aes(x=diff))+
+  geom_histogram(binwidth = 0.011)+
+  geom_vline(xintercept = BestFitDifferences$MeanDiffShift , col = 'gold' )+
+  theme_minimal()+
+  xlab('Cross-Species Mean Difference in Change of Key Ratios')+
+  annotate("text", label = "Best fit model to observation",
+           x = 0.35, y = 800, col = 'gold', )+
+  scale_x_continuous(limits = c(-0.2, 0.6)) 
+
+### Data Value
+ BestFitDifferences$MeanDiffShift
+
+### p-value (two-tailed test of different from null)
+sum(Null10k_CrossSpeciesMeans$diff >  BestFitDifferences$MeanDiffShift)*2/nrow(Null10k_CrossSpeciesMeans)
+```
+
+### Comparing whole bootstrap to null distribution 
+
+Repeating the analysis using samples from the bootstrap gives a sense of the bounds of the confidence that the final p-value can be specified given the uncertainty in the data. 
+
+```{r}
+igr_change_2 <- function(foc, comp,df_temp) {
+  nj_d <- with(df_temp, ni[focal == comp & treatment == 2])[1]
+  ni_d <- with(df_temp, ni[focal == foc & treatment == 2])[1]
+  ajj_d <- with(df_temp, alpha[focal == comp & competitor == comp & treatment == 2])
+  aij_d <- with(df_temp, alpha[focal == foc & competitor == comp & treatment == 2])
+  n_ratio_d = log10((ni_d-1)/(nj_d-1))
+  a_ratio_d = log10(ajj_d/aij_d)
+  
+  nj_w <- with(df_temp, ni[focal == comp & treatment == 1])[1]
+  ni_w <- with(df_temp, ni[focal == foc & treatment == 1])[1]
+  ajj_w <- with(df_temp, alpha[focal == comp & competitor == comp & treatment == 1])
+  aij_w <- with(df_temp, alpha[focal == foc & competitor == comp & treatment == 1])
+  n_ratio_w = log10((ni_w-1)/(nj_w-1))
+  a_ratio_w = log10(ajj_w/aij_w)
+  
+  nc<-n_ratio_w - n_ratio_d ## taking away the absolute-ing from here
+  ac<-a_ratio_w - a_ratio_d
+  return(c(nc, ac))
+}
+
+CalcIGR_From_Bootstrap <-  function(BootstrapId){
+  df_temp = final_output_nls_boot %>%filter(id == BootstrapId)  ## pull out each bootstrap fit
+  spp_list <- sort(na.omit( unique(seed_data$focal)))
+  comp_labels <- sort( na.omit( unique(seed_data$background) ))
+  spp_comp_combos2 <- expand.grid(species = spp_list,
+                                  competitor = comp_labels) # make dataframe of species pairs
+  spp_comp_combos2$n_change <- 0
+  spp_comp_combos2$a_change <- 0
+  spp_comp_combos2$diff <- 0
+  for(i in 1:nrow(spp_comp_combos2)){
+    ii <- spp_comp_combos2$species[i] 
+    jj <- spp_comp_combos2$competitor[i] 
+    IGR_change_both <- igr_change_2(ii, jj,df_temp)
+    spp_comp_combos2$n_change[i] <- IGR_change_both[1]
+    spp_comp_combos2$a_change[i] <- IGR_change_both[2]
+  }
+  spp_comp_combos2$sp_pair <- paste(spp_comp_combos2$species,
+                                    spp_comp_combos2$competitor, sep = "_")
+  spp_comp_combos2$BootstrapId = BootstrapId
+  return(spp_comp_combos2)
+}
+
+final_output_nls_boot<-read.csv(paste0(Path_to_Orig,"output/final_output_nls_boot_1000.csv"))
+
+map_df(unique( final_output_nls_boot$id),
+       CalcIGR_From_Bootstrap ) %>%
+  as_tibble() %>%
+  filter(sp_pair %in% total_pairs) %>%  ## Just do each competitive pair once, but NB not symmetric
+  mutate(diff= abs(a_change)- abs(n_change))-> Species_level_bootstrapIGR  
+
+### Bootstrap of cross-species averages
+Species_level_bootstrapIGR %>%
+  group_by(BootstrapId) %>%
+  summarise(CrossSpecies_diff_direct=mean(diff)) -> BootStrap_CrossSpecies
+
+```
+
+
+```{R}
+## Difference 
+Null10k_CrossSpeciesMeans %>%
+  ggplot()+
+  geom_density( aes(x=diff))+
+  geom_density( aes(x = CrossSpecies_diff_direct), 
+                col = 'blue', data =BootStrap_CrossSpecies )+
+  theme_minimal()+
+  xlab('Cross-Species Mean Difference in Change of Key Ratios')+
+  scale_x_continuous(limits = c(-0.2, 0.6))
+
+p_value_bootstrap <- rep(NA, 1000)
+
+for( bs in 1:1000){
+### Assuming a 2-sided test, need less than 0.025 of the null to be greater
+### than data to identify significant difference in direction described
+  p_value_bootstrap[bs] <- sum(Null10k_CrossSpeciesMeans$diff > BootStrap_CrossSpecies$CrossSpecies_diff_direct[bs])*2/10000  
+}
+
+hist(p_value_bootstrap, breaks =200,
+     main = 'Distribution of p-values from bootstrapping original data') 
+## NB p-values above 1 suggest support reverse hypothesis, that lambda difference was significantly larger 
+abline( v = 0.05)
+
+quantile(p_value_bootstrap, probs = seq(from=0, to = 1, by = 0.1))
+#  ^^^ P-value is very uncertain to resampling of the data, 
+
+```
+
+### Challenges with averages
+
+In their draft reply (dated May 2023) Van Dyke et al. present an analysis similar to the above, but taking a mean of the differences reported in the bootstrap sample. However, rather than taking an average of the final result from each bootstrap, they average of the absolute change of each of the demographic and competition ratio responses. This average is then used to calculate the difference in these quantities. I illustrate in this subsection how because the direction of ratio responses is uncertain, this gives a quite distinct result to using best-fit value. 
+
+```{r fig.height=10, fig.width=8, message=FALSE, warning=FALSE}
+Species_level_bootstrapIGR %>%
+  group_by(sp_pair) %>%
+  summarise(BS_Mean_demo_change = mean(n_change ), ## average change of the pair
+            BS_Mean_comp_change = mean(a_change),  ## average change of the pair
+            BS_Mean_ABSdemo_change = mean(abs(n_change)), ## VD Approach (average absolute change)
+            BS_Mean_ABScomp_change = mean(abs(a_change)),  ## VD Approach (average absolute change)
+            
+            BS_Mean_Diff_abs = mean(abs(a_change))-mean(abs(n_change)), ## VD Approach
+            BS_Mean_diff     =   abs(mean(a_change))- abs(mean(n_change))) %>% ### avoiding averaging issue
+  ungroup()-> MeanBootstrap_SpLevel_Ratios
+
+## Just taking three particuarly problematic  pairs 
+Pairs_to_plot = c("URLI_HOMU", "URLI_FEMI","URLI_ACWR" )
+
+Species_level_bootstrapIGR %>%
+  filter( sp_pair %in% Pairs_to_plot)%>%
+  ggplot( aes( x = n_change))+
+  geom_histogram()+
+  geom_vline(xintercept = 0)+
+  facet_wrap(~sp_pair, scales = 'free_x', nrow = 3)+
+  ggtitle('Distribution of Demographic Ratio Changes\nin Bootstrap BEFORE taking absolute')+
+  theme_minimal()+
+  xlab('Change in Dempgraphic Ratio (Direct Values)') -> ProblemID1
+
+Species_level_bootstrapIGR %>%
+  filter( sp_pair %in% Pairs_to_plot)%>%
+  ggplot( aes( x = abs(n_change)))+
+  geom_histogram()+
+  geom_vline(data = filter( MeanBootstrap_SpLevel_Ratios, sp_pair %in% Pairs_to_plot),
+             aes(xintercept = BS_Mean_ABSdemo_change ), 
+             linetype = 'dashed')+
+  geom_vline(data =filter( OrigData_Shifts, sp_pair %in% Pairs_to_plot),
+             aes(xintercept = Demo_shift  ))+
+  facet_wrap(~sp_pair, scales = 'free_x', nrow = 3)+
+  ggtitle('Distribution of Demographic Ratio Changes\nin Bootstrap AFTER taking absolute',
+          'Solid vertical line shows best-fit value, \nDashed line shows post-absolute Average (Van Dyke  et al. Method)')+
+  theme_minimal()+
+  xlab('Change in Dempgraphic Ratio (Absolute Values)') -> ProblemID2
+
+
+### Repeating with Competition Change
+
+Species_level_bootstrapIGR %>%
+  filter( sp_pair %in% Pairs_to_plot)%>%
+  ggplot( aes( x = a_change    ))+
+  geom_histogram()+
+  geom_vline(xintercept=0)+
+  facet_wrap(~sp_pair, scales = 'free_x', nrow = 3)+
+  ggtitle('Distribution of Competitive Ratio Changes\nin Bootstrap BEFORE taking absolute')+
+  theme_minimal()+
+  xlab('Change in Competition Ratio (Direct Values)') -> ProblemID3
+
+Species_level_bootstrapIGR %>%
+  filter( sp_pair %in% Pairs_to_plot)%>%
+  ggplot( aes( x = abs(a_change    )))+
+  geom_histogram()+
+  geom_vline(data =  filter( MeanBootstrap_SpLevel_Ratios, sp_pair %in% Pairs_to_plot),
+             aes(xintercept = BS_Mean_ABScomp_change  ), 
+             linetype = 'dashed')+
+  geom_vline(data =filter( OrigData_Shifts, sp_pair %in% Pairs_to_plot),
+             aes(xintercept = Intc_shift  ))+
+  facet_wrap(~sp_pair, scales = 'free_x', nrow = 3)+
+  ggtitle('Distribution of Competitive Ratio Changes\nin Bootstrap AFTER taking absolute',
+          'Solid vertical line shows best-fit value, \nDashed line shows post-absolute average (Van Dyke et al. Method)')+
+  theme_minimal()+
+  xlab('Change in Competition Ratio (Absolute Values)') -> ProblemID4
+
+plot_grid(ProblemID1, ProblemID2, ProblemID3, ProblemID4)
+
+```
+
+For reference, the key functions used in Van Dyke et al's draft reply are below: 
+
+```{r}
+### Van Dyke Method: (with issues highlights)
+# igr_change_VD <- function(foc, comp) {
+#   nj_d <- with(df_temp, ni[focal == comp & treatment == 2])[1]
+#   ni_d <- with(df_temp, ni[focal == foc & treatment == 2])[1]
+#   ajj_d <- with(df_temp, alpha[focal == comp & competitor == comp & treatment == 2])
+#   aij_d <- with(df_temp, alpha[focal == foc & competitor == comp & treatment == 2])
+#   n_ratio_d = log10((ni_d-1)/(nj_d-1))
+#   a_ratio_d = log10(ajj_d/aij_d)
+#   nj_w <- with(df_temp, ni[focal == comp & treatment == 1])[1]
+#   ni_w <- with(df_temp, ni[focal == foc & treatment == 1])[1]
+#   ajj_w <- with(df_temp, alpha[focal == comp & competitor == comp & treatment == 1])
+#   aij_w <- with(df_temp, alpha[focal == foc & competitor == comp & treatment == 1])
+#   n_ratio_w = log10((ni_w-1)/(nj_w-1))
+#   a_ratio_w = log10(ajj_w/aij_w)
+#   nc<-abs(n_ratio_w - n_ratio_d)                    ### <<<<Taking absolute of differences here
+#   ac<-abs(a_ratio_w - a_ratio_d)                    ### <<<<Taking absolute of differences here
+#   return(c(nc, ac))
+# }
+
+# for(aa in 1:nrow(n_a_change_df_real)){
+#   boot_id <- n_a_change_df_real[aa, "boot"]
+#   df_temp <- final_output_nls_boot %>% filter(id == boot_id)
+#   #Create data frame
+#   spp_list <- sort(na.omit( unique(seed_data$focal)))
+#   comp_labels <- sort( na.omit( unique(seed_data$background) ))
+#   spp_comp_combos2 <- expand.grid(species = spp_list, competitor = comp_labels)
+#   spp_comp_combos2$n_change <- 0
+#   spp_comp_combos2$a_change <- 0
+#   spp_comp_combos2$diff <- 0
+#   for(i in 1:nrow(spp_comp_combos2)){
+#     ii <- spp_comp_combos2[i, "species"] %>% unlist
+#     jj <- spp_comp_combos2[i, "competitor"] %>% unlist
+#     spp_comp_combos2[i, "n_change"] <- igr_change_VD(ii, jj)[1]
+#     spp_comp_combos2[i, "a_change"] <- igr_change_VD(ii, jj)[2]
+#     spp_comp_combos2[i, "diff"] <- igr_change_VD(ii, jj)[2]-igr_change_VD(ii, jj)[1]
+#   }
+#   spp_comp_combos2$sp_pair <- paste(spp_comp_combos2$species,
+#                                     spp_comp_combos2$competitor, sep = "_")
+#   spp_comp_combos2 <-spp_comp_combos2 %>% filter(sp_pair %in% total_pairs)
+
+#   n_a_change_df_real[aa, "mean_n_change"] <- mean(spp_comp_combos2$n_change)    
+#   n_a_change_df_real[aa, "mean_a_change"] <- mean(spp_comp_combos2$a_change)
+###                    ^^^^^^^^^^^^^^^^^Taking average of differences here
+
+#   n_a_change_df_real[aa, "diff"] <- mean(spp_comp_combos2$diff)
+#   n_a_change_df_real[aa, "pval"] <- t.test(spp_comp_combos2$n_change,
+#                                            spp_comp_combos2$a_change, paired = T)[3]
+# }
+
+
+``` 
+
+### Impact of averaging on final results
+
+This effect of averaging over-uncertain directions leads to an inflated mean difference in the key quantity (the cross-species average difference in the key ratios). 
+
+```{R}
+### Taking cross species means:
+MeanBootstrap_SpLevel_Ratios %>%
+  summarise(Cross_Species_Diff_abs= 
+              mean(BS_Mean_Diff_abs), ## VD Approach
+            Cross_Species_Diff_direct =
+              mean(BS_Mean_diff))%>%  ## Updated Approach 
+  as.list->  CrossSpeciesMeans
+
+DataValues <- data.frame(Method = c("Mean after taking absolute\nfrom bootstraps\n(van Dyke et al reply approach)",
+                                    "Mean of Bootstrap,\ncorrected method",
+                                    "Best fit model to observation"),
+                         Value = c( CrossSpeciesMeans$Cross_Species_Diff_abs,
+                                    CrossSpeciesMeans$Cross_Species_Diff_direct,
+                                    BestFitDifferences$MeanDiffShift ))
+
+
+Null10k_CrossSpeciesMeans %>%
+  ggplot( aes(x=diff))+
+  geom_histogram(binwidth = 0.011)+
+  geom_vline(aes(col = Method,
+                 linetype =Method ,
+                 xintercept = Value),
+             data = DataValues)+
+  scale_colour_manual(values =c('gold', 'red', 'blue'))+
+  theme_minimal()+
+  theme(legend.position = 'bottom')+
+  xlab('Cross-Species Mean Difference in Change of Key Ratios')+
+  scale_x_continuous(limits = c(-0.2, 0.6))
+
+### Calculating p-values
+DataValues$pvalue = NA
+for(i in 1:3){
+  DataValues$pvalue[i] <- sum(Null10k_CrossSpeciesMeans$diff > DataValues$Value[i])*2/10000
+}
+
+knitr::kable(DataValues, format = 'latex')
+
+
+```
+
+
+### Illustration of the need to take sufficient null model draws
+
+In their draft reply, Van Dyke et al. used 1000 null models draws and found a p-value of 0.036. 
+
+Here I show that 1000 draws is sufficient to characterise the mean, but insufficient to characterise the p-value reliably by taking subsamples of the 10k null model set. 
+
+```{r}
+## Taking 100 different draws of 1000 from the null model to assess
+set.seed(1)
+p_Value_vector <- rep(NA, 1000)
+for( draw in 1:1000){
+  SELECTION =   sample(1:10000, size = 1000, replace = FALSE) 
+  NULL_Selection = Null10k_CrossSpeciesMeans$diff[SELECTION]
+  p_Value_vector[draw] <- ( sum(NULL_Selection> DataValues$Value[1]  )*2/1000)
+}
+
+mean(p_Value_vector<0.05)*100 ## Percent of cases where p-value was significant
+
+hist(p_Value_vector, breaks =seq(0.01, 0.1, by= 0.005),
+     main = 'Distribution of p-values with 1k null draws using Van Dyke et als value') 
+abline(v = 0.036, lty=2)
+abline(v = DataValues$pvalue[1])
+
+### 95% of 
+quantile2(p_Value_vector)
+
+## Even 10k draws is still a little uncertain about the significance
+## Note that this is using the inflated value of the data observation. 
+set.seed(1)
+p_Value_vector10k <- rep(NA, 1000)
+for( draw in 1:1000){
+  SELECTION =   sample(1:10000, size = 10000, replace = TRUE) ## resampling
+  NULL_Selection = Null10k_CrossSpeciesMeans$diff[SELECTION]
+  p_Value_vector10k[draw] <- ( sum(NULL_Selection> DataValues$Value[1]  )*2/10000)
+}
+
+hist(p_Value_vector10k, breaks =seq(0.04, 0.07, by= 0.001),
+     main = "Distribution of p-values with bootstrapped 10k\nnull draws using original authors' value") 
+
+## Bootstrapping the 10k null models and the best-fit data observation
+## suggests strong confidence non-significant result is not dependent on sample size. 
+
+set.seed(1)
+p_Value_vector10k <- rep(NA, 1000)
+for( draw in 1:1000){
+  SELECTION =   sample(1:10000, size = 10000, replace = TRUE) ## resampling
+  NULL_Selection = Null10k_CrossSpeciesMeans$diff[SELECTION]
+  p_Value_vector10k[draw] <- ( sum(NULL_Selection> DataValues$Value[3]  )*2/10000)
+}
+
+hist(p_Value_vector10k, breaks =seq(0.05, 0.15, by= 0.001),
+     main = 'Distribution of p-values with bootstrapped 10k\nnull draws using best-fit value') 
+
+```
+
 
 # Session Information
 
